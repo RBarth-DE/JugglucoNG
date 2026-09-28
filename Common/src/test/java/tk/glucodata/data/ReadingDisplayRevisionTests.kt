@@ -51,11 +51,25 @@ class ReadingDisplayRevisionTests {
     @Test fun changedValueAndProvenanceStillReviseUnsealedMinutes() {
         listOf(
             mapOf("displayMgdl" to 121f), mapOf("sensorSerial" to "B"),
-            mapOf("viewMode" to 1), mapOf("calibrationFingerprint" to 8L),
+            // Same-lane presentation change (auto → auto+raw): still a revision.
+            mapOf("viewMode" to 2), mapOf("calibrationFingerprint" to 8L),
         ).forEach { change ->
             database().use { db ->
                 assertEquals(1, revise(db, change))
                 assertEquals(0, revise(db, change))
+            }
+        }
+    }
+
+    @Test fun crossLanePresentationDoesNotReviseUnsealedMinutes() {
+        // A record is a fact about a minute *and a lane*: toggling the view
+        // mode resubmits the visible minutes in the other lane's numbers, and
+        // letting that land froze wrong-lane values one toggle at a time. The
+        // seeded row is viewMode 0 (auto); raw-primary presentations of it are
+        // refused, while the same-lane dual mode still revises.
+        listOf(1, 3).forEach { mode ->
+            database().use { db ->
+                assertEquals(0, revise(db, mapOf("viewMode" to mode, "displayMgdl" to 31.4f)))
             }
         }
     }

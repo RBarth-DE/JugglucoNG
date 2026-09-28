@@ -787,7 +787,10 @@ class StatsViewModel : ViewModel() {
 
             // A reading whose displayed value was recorded overrides the series
             // recomputed above: the statistic has to describe what was on screen,
-            // not what today's calibration would have made of it.
+            // not what today's calibration would have made of it. The record only
+            // overrides the lane it was shown on — a raw-line record says nothing
+            // about the auto line (see recordAppliesToLane), or a past raw-mode
+            // stretch would poison the auto statistics with raw numbers.
             //
             // Converted, because the two sides are not in the same unit.
             // [calibratedDisplayValues] holds display units — it is filled from
@@ -800,8 +803,17 @@ class StatsViewModel : ViewModel() {
             // the unsealed last hour survived. Harmless while the record was
             // sparse enough to almost never fire; total once coverage was fixed.
             history.forEachIndexed { index, point ->
+                val pointSensorSerial = point.sensorSerial ?: sensorSerial
+                val pointViewMode = sensorViewModes[pointSensorSerial] ?: viewMode
+                val isRawMode = pointViewMode == 1 || pointViewMode == 3
                 point.sealedDisplayValue
                     ?.takeIf { it.isFinite() && it > 0f }
+                    ?.takeIf {
+                        tk.glucodata.chart.HistoryChartModelBuilder.recordAppliesToLane(
+                            point.sealedDisplayViewMode ?: -1,
+                            isRawMode
+                        )
+                    }
                     ?.let { calibratedDisplayValues[index] = GlucoseFormatter.displayFromMgDl(it, isMmol) }
             }
         }
