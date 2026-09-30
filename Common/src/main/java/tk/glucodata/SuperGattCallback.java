@@ -517,13 +517,14 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || alarm == 19;
     }
 
-    public static void processExternalCurrentReading(String sensorSerial, float glucoseValue, float rate,
-            long timmsec, int sensorgen) {
-        processExternalCurrentReading(sensorSerial, LiveReadingLanes.resolved(glucoseValue), rate, timmsec,
-                sensorgen);
-    }
-
-    /** Publish without storing: stock lanes need display resolution; resolved values are final. */
+    /**
+     * Publish without storing: stock lanes need display resolution; resolved values are final.
+     *
+     * There is deliberately no bare-float overload. One existed and took its value as
+     * resolved, so every driver that handed over the sensor's own number (AiDEX,
+     * Sibionics, Ottai) skipped software calibration on the notification and the
+     * alerts while the chart applied it (#479). A caller has to say which it holds.
+     */
     public static void processExternalCurrentReading(String sensorSerial, LiveReadingLanes reading, float rate,
             long timmsec, int sensorgen) {
         if (reading == null || !reading.getHasValue() || timmsec <= 0L) {
@@ -538,10 +539,18 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         } else {
             final var display = CurrentDisplaySource.resolveIncomingReading(reading, rate, timmsec,
                     resolvedSensorSerial, sensorgen);
-            if (display == null) {
-                return;
+            if (display != null) {
+                glucoseValue = display.getPrimaryValue();
+            } else {
+                // Resolution failing is no reason to withhold the reading: publish the
+                // sensor's own number, as the bare-float path always did.
+                glucoseValue = stockPrimaryValue(reading);
+                if (!Float.isFinite(glucoseValue) || glucoseValue <= 0f) {
+                    return;
+                }
+                Log.w(LOG_ID, "processExternalCurrentReading: display resolution failed for "
+                        + resolvedSensorSerial + "; publishing the stock value");
             }
-            glucoseValue = display.getPrimaryValue();
         }
         if (glucosealarms == null) {
             glucosealarms = GlucoseAlarmsAccess.create(Applic.app);
@@ -549,6 +558,11 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         final int mgdlValue = Math.round(glucoseValue * (Applic.unit == 1 ? mgdLmult : 1.0f));
         dowithglucose(resolvedSensorSerial, mgdlValue, glucoseValue, rate, 0, timmsec,
                 0L, Notify.glucosetimeout, sensorgen, reading);
+    }
+
+    private static float stockPrimaryValue(LiveReadingLanes reading) {
+        final float auto = reading.getStockAuto();
+        return (Float.isFinite(auto) && auto > 0.1f) ? auto : reading.getStockRaw();
     }
 
     private static long[] loadRecentSensorHistory(String sensorSerial, long startTimeSec) {
