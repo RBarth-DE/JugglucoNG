@@ -78,6 +78,28 @@ class ReadingDisplayRevisionTests {
         assertEquals(0, revise(db, mapOf("sealHorizon" to 60000L, "displayMgdl" to 130f, "sensorSerial" to "B")))
     }
 
+    @Test fun repeatedTogglesPreserveTheRecordedLaneInBothDirections() {
+        for (recordedMode in 0..3) {
+            database().use { db ->
+                db.createStatement().use { it.executeUpdate("UPDATE reading_display SET viewMode=$recordedMode") }
+                for ((index, requestedMode) in listOf(0, 1, 2, 3, 2, 1, 0).withIndex()) {
+                    val sameLane = (recordedMode and 1) == (requestedMode and 1)
+                    val changedValue = 130f + index
+                    assertEquals(
+                        if (sameLane) 1 else 0,
+                        revise(db, mapOf("viewMode" to requestedMode, "displayMgdl" to changedValue)),
+                    )
+                    db.createStatement().use { statement ->
+                        statement.executeQuery("SELECT viewMode FROM reading_display").use {
+                            it.next()
+                            assertEquals(recordedMode and 1, it.getInt(1) and 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun minuteImmediatelyInsideGraceWindowCanChange() = database().use { db ->
         assertEquals(1, revise(db, mapOf("sealHorizon" to 59999L, "displayMgdl" to 130f)))
     }

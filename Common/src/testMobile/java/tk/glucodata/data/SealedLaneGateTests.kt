@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import tk.glucodata.ui.GlucosePoint
+import tk.glucodata.ui.PredictionHistorySource
+import tk.glucodata.ui.buildDisplayHistoryForPrediction
 
 /**
  * A recorded main value is a fact about a minute *and a lane*. The chart
@@ -130,5 +132,37 @@ class SealedLaneGateTests {
                 sensorId = SENSOR
             )
         )
+    }
+
+    @Test
+    fun allViewModesGateExportsRowsAndPredictionsByTheSameLane() {
+        for (recordedMode in 0..3) {
+            val point = point(sealed = 127f, sealedMode = recordedMode)
+            for (requestedMode in 0..3) {
+                val raw = requestedMode == 1 || requestedMode == 3
+                val sameLane = (recordedMode and 1) == (requestedMode and 1)
+                val expected = if (sameLane) 127f else null
+                for (isMmol in listOf(false, true)) {
+                    val exported = ExportCalibration.calibratedMgDl(
+                        autoMgDl = AUTO_STOCK,
+                        rawMgDl = RAW_STOCK,
+                        timestamp = TS,
+                        sensorId = SENSOR,
+                        viewMode = requestedMode,
+                        isMmol = isMmol,
+                        sealedMgDl = 127f,
+                        sealedViewMode = recordedMode,
+                    )
+                    if (expected == null) assertNull(exported)
+                    else assertEquals(expected, exported ?: Float.NaN, 0.001f)
+                }
+                assertEquals(expected, tk.glucodata.ui.SealedGlucoseValue.calibratedFor(point, raw, SENSOR))
+                val prediction = buildDisplayHistoryForPrediction(
+                    listOf(point),
+                    if (raw) PredictionHistorySource.CALIBRATED_RAW else PredictionHistorySource.CALIBRATED_AUTO,
+                ).single()
+                assertEquals(expected ?: if (raw) RAW_STOCK else AUTO_STOCK, prediction.value, 0.001f)
+            }
+        }
     }
 }
