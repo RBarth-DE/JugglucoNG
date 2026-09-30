@@ -519,19 +519,36 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
 
     public static void processExternalCurrentReading(String sensorSerial, float glucoseValue, float rate,
             long timmsec, int sensorgen) {
-        if (!Float.isFinite(glucoseValue) || glucoseValue <= 0f || timmsec <= 0L) {
+        processExternalCurrentReading(sensorSerial, LiveReadingLanes.resolved(glucoseValue), rate, timmsec,
+                sensorgen);
+    }
+
+    /** Publish without storing: stock lanes need display resolution; resolved values are final. */
+    public static void processExternalCurrentReading(String sensorSerial, LiveReadingLanes reading, float rate,
+            long timmsec, int sensorgen) {
+        if (reading == null || !reading.getHasValue() || timmsec <= 0L) {
             return;
-        }
-        if (glucosealarms == null) {
-            glucosealarms = GlucoseAlarmsAccess.create(Applic.app);
         }
         final String resolvedSensorSerial = (sensorSerial != null && !sensorSerial.isEmpty())
                 ? sensorSerial
                 : Natives.lastsensorname();
+        final float glucoseValue;
+        if (reading.isResolved()) {
+            glucoseValue = reading.getResolvedValue();
+        } else {
+            final var display = CurrentDisplaySource.resolveIncomingReading(reading, rate, timmsec,
+                    resolvedSensorSerial, sensorgen);
+            if (display == null) {
+                return;
+            }
+            glucoseValue = display.getPrimaryValue();
+        }
+        if (glucosealarms == null) {
+            glucosealarms = GlucoseAlarmsAccess.create(Applic.app);
+        }
         final int mgdlValue = Math.round(glucoseValue * (Applic.unit == 1 ? mgdLmult : 1.0f));
-        // Both callers hand over a value CurrentDisplaySource already resolved.
         dowithglucose(resolvedSensorSerial, mgdlValue, glucoseValue, rate, 0, timmsec,
-                0L, Notify.glucosetimeout, sensorgen, LiveReadingLanes.resolved(glucoseValue));
+                0L, Notify.glucosetimeout, sensorgen, reading);
     }
 
     private static long[] loadRecentSensorHistory(String sensorSerial, long startTimeSec) {
