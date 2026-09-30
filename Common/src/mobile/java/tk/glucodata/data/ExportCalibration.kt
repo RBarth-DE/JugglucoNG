@@ -24,6 +24,17 @@ object ExportCalibration {
     /** viewMode 1/3 mean the sensor's primary lane is the raw signal, not auto. */
     private fun isRawMode(viewMode: Int): Boolean = viewMode == 1 || viewMode == 3
 
+    /**
+     * The stored value the projection starts from: the raw lane in raw mode, the auto
+     * lane otherwise, or null when that lane has nothing usable. Split out because
+     * "which lane" is the whole of the disagreement this object exists to prevent
+     * (issue #130), and it is the one decision here that needs no database to test.
+     */
+    fun laneBaseValue(autoDisplayValue: Float, rawDisplayValue: Float, viewMode: Int): Float? {
+        val base = if (isRawMode(viewMode)) rawDisplayValue else autoDisplayValue
+        return base.takeIf { it.isFinite() && it > 0.1f }
+    }
+
     /** Per-run cache so we resolve a sensor's viewMode once, not once per reading. */
     fun viewModeResolver(): (String?) -> Int {
         val cache = HashMap<String, Int>()
@@ -68,8 +79,7 @@ object ExportCalibration {
         sealedDisplayValue?.takeIf { it.isFinite() && it > 0.1f }
             ?.takeIf { HistoryChartModelBuilder.recordAppliesToLane(sealedDisplayViewMode ?: -1, raw) }
             ?.let { return it }
-        val base = if (raw) rawDisplayValue else autoDisplayValue
-        if (!base.isFinite() || base <= 0.1f) return null
+        val base = laneBaseValue(autoDisplayValue, rawDisplayValue, viewMode) ?: return null
         val calSensorId = sensorId?.takeIf { it.isNotBlank() }
         if (!CalibrationManager.hasActiveCalibration(raw, calSensorId)) return null
         val calibrated = CalibrationManager.getCalibratedValue(
