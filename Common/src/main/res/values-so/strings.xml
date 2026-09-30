@@ -1004,26 +1004,6 @@ Marka la cadaadiyo OK waxay dhalin doontaa xidhiidh teleefankan oo waxa ay soo b
     
     <string name="select_sensor_type">Dooro nooca dareenka</string>
     <string name="choose_theme">Dooro mawduuc</string>
-    <string name="sibionics_sensor">Sibionics</string>
-    <string name="sibionics_sensor_desc">GS1, GS3, Sibionics 2 · iskaan garee koodka QR ee dareemaha</string>
-    <string name="libre_sensor">FreeStyle Libre</string>
-    <string name="libre_sensor_desc">Libre 2, 2+, 3, 3+ · taleefanka u dhowee dareemaha</string>
-    <string name="dexcom_sensor">Dexcom</string>
-    <string name="dexcom_sensor_desc">G7, ONE+ · iskaan garee koodka dareemaha</string>
-    <string name="accuchek_sensor">Accu-Chek SmartGuide</string>
-    <string name="accuchek_sensor_desc">Iskaan garee koodka Data Matrix ee dareemaha</string>
-    <string name="caresens_air_sensor">CareSens Hawada</string>
-    <string name="caresens_air_sensor_desc">Iskaan garee koodka dareemaha ee baakada</string>
-    <string name="aidex_sensor">AiDex / LinX</string>
-    <string name="aidex_sensor_desc">AiDEX X, LinX · ka dooro dareemaha qalabka u dhow</string>
-    <string name="icanhealth_sensor">Sinocare iCan</string>
-    <string name="icanhealth_sensor_desc">i3, i6, i7 · iskaan garee ama geli lambarka taxanaha</string>
-    <string name="mq_sensor">MQ / Glutec</string>
-    <string name="mq_sensor_desc">Gudbiyaha Glutec · ka dooro qalabka u dhow</string>
-    <string name="anytime_sensor">Yuwell Anytime</string>
-    <string name="anytime_sensor_desc">CT2–CT5 · iskaan garee koodka QR ee dareemaha</string>
-    <string name="ottai_sensor">Ottai</string>
-    <string name="ottai_sensor_desc">Ottai, Syai · gal ama soo deji fayl aqoonsi</string>
 
     <!-- Ottai Setup Wizard -->
     <string name="ottai_setup_title">Dejinta Ottai</string>
