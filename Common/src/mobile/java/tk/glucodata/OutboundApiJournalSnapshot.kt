@@ -16,6 +16,7 @@ import java.util.Calendar
 import org.json.JSONArray
 import org.json.JSONObject
 import tk.glucodata.data.HistoryDatabase
+import tk.glucodata.data.journal.CarbEntry
 import tk.glucodata.data.journal.JournalEntryEntity
 import tk.glucodata.data.journal.JournalEntrySource
 import tk.glucodata.data.journal.JournalEntryType
@@ -23,6 +24,7 @@ import tk.glucodata.data.journal.CloneJournalIdentity
 import tk.glucodata.data.journal.JournalFoodEntity
 import tk.glucodata.data.journal.JournalInsulinPreset
 import tk.glucodata.data.journal.JournalIobCalculator
+import tk.glucodata.data.journal.JournalIobMath
 import tk.glucodata.data.journal.JournalInsulinPresetEntity
 import tk.glucodata.data.journal.JournalRepository
 import tk.glucodata.data.journal.JournalTreatmentTransfer
@@ -139,16 +141,22 @@ object OutboundApiJournalSnapshot : JournalSnapshotBridge {
         return fresh
     }
 
+    override fun invalidateBroadcastIobCache() {
+        broadcastIobCache = null
+    }
+
     private suspend fun buildBroadcastIob(
         atMillis: Long,
         allowCloneRemote: Boolean = true,
         allowNightscoutRemote: Boolean = true,
+        allowApiRemote: Boolean = true,
     ): FloatArray? {
         val app = Applic.app ?: return null
         val remote = RemoteIobSnapshot.fresh(
             atMillis,
             allowClone = allowCloneRemote,
             allowNightscout = allowNightscoutRemote,
+            allowApi = allowApiRemote,
         )
         val prefs = app.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (!prefs.getBoolean(JOURNAL_ENABLED_KEY, true)) {
@@ -187,7 +195,9 @@ object OutboundApiJournalSnapshot : JournalSnapshotBridge {
         // A fresh devicestatus from the uploading device replaces the local
         // journal math: IOB, eIOB and COB switch source together because they
         // come from one document and one computation — mixing them would be
-        // inconsistent. The one exception is a field the document lacks (an
+        // inconsistent. The same holds for the HTTP API follower snapshot: it
+        // is one sender's computation, preferred over the local one while
+        // fresh. The one exception is a field the document lacks (an
         // uploader without carb data omits cob): that field alone stays
         // local. The 30-minute-window projections keep the local values in
         // either case; they only feed the notification risk tint and have no
@@ -213,9 +223,12 @@ object OutboundApiJournalSnapshot : JournalSnapshotBridge {
             // turn a receiver into a timestamp-refreshing echo and keep stale
             // IOB alive after the authoritative sender disappeared. Local
             // journal state and a configured Nightscout follower remain valid
-            // sources for this phone's outbound snapshot.
+            // sources for this phone's outbound snapshot; the direct HTTP API
+            // follower snapshot is excluded for the same no-echo reason.
+            // (Journal entries imported from the API source still flow through
+            // the local computation, as before.)
             runCatching {
-                buildBroadcastIob(atMillis, allowCloneRemote = false)
+                buildBroadcastIob(atMillis, allowCloneRemote = false, allowApiRemote = false)
             }.getOrNull()
         } ?: return@runBlocking ""
         CloneIobSnapshot.encode(values, atMillis)
@@ -230,6 +243,7 @@ object OutboundApiJournalSnapshot : JournalSnapshotBridge {
                     atMillis,
                     allowCloneRemote = false,
                     allowNightscoutRemote = false,
+                    allowApiRemote = false,
                 )
             }.getOrNull()
         }
@@ -698,21 +712,17 @@ object OutboundApiJournalSnapshot : JournalSnapshotBridge {
     private fun activeCarbsGrams(entries: List<JournalEntryEntity>, atMillis: Long): Float {
         val prefs = Applic.app.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val profile = PredictionModelProfileStore.load(prefs)
-        return entries.sumOf { entry ->
-            if (JournalEntryType.fromStorage(entry.entryType) != JournalEntryType.CARBS) return@sumOf 0.0
-            val grams = entry.amount?.takeIf { it.isFinite() && it > 0f } ?: return@sumOf 0.0
-            val absorptionMinutes = entry.durationMinutes?.toFloat()
-                ?: (grams / profile.parametersAt(entry.timestamp).carbAbsorptionGramsPerHour * 60f)
-                    .coerceIn(30f, 360f)
-            val progress = linearProgress(entry.timestamp, absorptionMinutes, atMillis)
-            (grams * (1f - progress)).coerceAtLeast(0f).toDouble()
-        }.toFloat()
-    }
-
-    private fun linearProgress(startMillis: Long, durationMinutes: Float, atMillis: Long): Float {
-        if (atMillis <= startMillis) return 0f
-        val elapsedMinutes = (atMillis - startMillis) / 60_000f
-        return (elapsedMinutes / durationMinutes.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        // The absorption arithmetic is shared (plan §4 category W, D1: the watch
+        // computes COB from its synced journal); the profile stays here because
+        // it is time-dependent and this is where the phone's entries are.
+        val carbs = entries.mapNotNull { entry ->
+            if (JournalEntryType.fromStorage(entry.entryType) != JournalEntryType.CARBS) return@mapNotNull null
+            val grams = entry.amount?.takeIf { it.isFinite() && it > 0f } ?: return@mapNotNull null
+            CarbEntry(entry.timestamp, grams, entry.durationMinutes?.toFloat())
+        }
+        return JournalIobMath.activeCarbsGrams(carbs, atMillis) { timestampMillis ->
+            profile.parametersAt(timestampMillis).carbAbsorptionGramsPerHour
+        }
     }
 
     private fun toPresetModel(entity: JournalInsulinPresetEntity): JournalInsulinPreset =
