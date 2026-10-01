@@ -117,7 +117,7 @@ abstract class MultiSensorComplicationBase : SuspendingComplicationDataSourceSer
     }
 }
 
-/** All content fits inside a circle's inscribed square, including the first/last sensor. */
+/** One inline row, with the same light sensor tints as the phone's reading values. */
 internal fun multiSensorBitmap(values: List<MultiSensorValue>, arrows: Boolean): Bitmap {
     val size = 320
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -125,27 +125,34 @@ internal fun multiSensorBitmap(values: List<MultiSensorValue>, arrows: Boolean):
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD) }
     val inset = size * 0.16f
     val width = size - 2 * inset
-    val count = values.size.coerceAtLeast(1)
-    val rowHeight = minOf(width / count, size * 0.25f)
-    val top = (size - rowHeight * count) / 2f
     val rows = values.ifEmpty { listOf(MultiSensorValue("", null, 0xFFE3E2DE.toInt())) }
+    val gap = size * 0.025f
+    val arrowWidth = if (arrows) size * 0.09f else 0f
+    paint.textSize = size * 0.2f
+    val textWidth = rows.sumOf { paint.measureText(it.text).toDouble() }.toFloat()
+    val available = width - gap * (rows.size - 1) - (arrowWidth + if (arrows) gap else 0f) * rows.size
+    if (textWidth > available) paint.textSize *= available.coerceAtLeast(1f) / textWidth
+    val totalWidth = rows.sumOf { paint.measureText(it.text).toDouble() }.toFloat() +
+        gap * (rows.size - 1) + (arrowWidth + if (arrows) gap else 0f) * rows.size
+    var x = (size - totalWidth) / 2f
+    val centerY = size / 2f
+    val baseline = centerY - (paint.ascent() + paint.descent()) / 2f
     rows.forEachIndexed { index, value ->
-        val centerY = top + (index + 0.5f) * rowHeight
-        paint.color = value.colorArgb
-        canvas.drawCircle(inset + rowHeight * 0.08f, centerY, rowHeight * 0.05f, paint)
-        paint.color = value.reading?.let { ComplicationRenderer.valueColor(it.value, it.isMmol) } ?: 0xFFE3E2DE.toInt()
-        paint.textSize = rowHeight * 0.72f
-        val textLeft = inset + rowHeight * 0.2f
-        val arrowWidth = if (arrows) rowHeight * 0.5f else 0f
-        val available = width - rowHeight * 0.2f - arrowWidth
-        val measured = paint.measureText(value.text)
-        if (measured > available) paint.textSize *= available / measured
-        val baseline = centerY - (paint.ascent() + paint.descent()) / 2f
-        canvas.drawText(value.text, textLeft, baseline, paint)
-        value.reading?.rate?.takeIf { arrows && it.isFinite() }?.let { rate ->
-            ComplicationRenderer.drawArrow(canvas, arrowWidth, arrowWidth, rate, paint.color,
-                size - inset - arrowWidth, centerY - arrowWidth / 2f)
+        paint.color = tk.glucodata.SensorVisuals.blendArgb(
+            0xFFE3E2DE.toInt(), value.colorArgb,
+            if (index == 0) tk.glucodata.SensorVisuals.PRIMARY_TEXT_BLEND else tk.glucodata.SensorVisuals.PEER_TEXT_BLEND,
+        )
+        canvas.drawText(value.text, x, baseline, paint)
+        x += paint.measureText(value.text)
+        if (arrows) {
+            x += gap
+            value.reading?.rate?.takeIf { it.isFinite() }?.let { rate ->
+                ComplicationRenderer.drawArrow(canvas, arrowWidth, arrowWidth, rate, paint.color,
+                    x, centerY - arrowWidth / 2f)
+            }
+            x += arrowWidth
         }
+        x += gap
     }
     return bitmap
 }

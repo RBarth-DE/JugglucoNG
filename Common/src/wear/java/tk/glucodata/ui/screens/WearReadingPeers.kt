@@ -1,13 +1,9 @@
 package tk.glucodata.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +42,7 @@ internal fun readingPeers(
     return result
 }
 
-/** Stack sensors so dual-lane values still fit a round watch without shrinking the time. */
+/** Match the phone: one inline value/arrow per sensor, with a subtle identity tint. */
 @Composable
 internal fun ReadingValues(
     point: GlucosePoint,
@@ -56,10 +52,10 @@ internal fun ReadingValues(
     peers: List<WearReadingPeer>,
     primaryColorArgb: Int? = null,
 ) {
-    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SensorValue(point, viewMode, isMmol, velocity, primaryColorArgb)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SensorValue(point, viewMode, isMmol, velocity, primaryColorArgb, false)
         peers.forEach { peer ->
-            SensorValue(peer.point, peer.series.viewMode, isMmol, peer.velocity, peer.series.colorArgb,
+            SensorValue(peer.point, peer.series.viewMode, isMmol, peer.velocity, peer.series.colorArgb, true,
                 Modifier.semantics { contentDescription = peer.series.sensorId })
         }
     }
@@ -72,26 +68,32 @@ private fun SensorValue(
     isMmol: Boolean,
     velocity: Float,
     identityArgb: Int?,
+    isPeer: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val neutral = MaterialTheme.colorScheme.onSurface
+    val valueColor = identityArgb?.let {
+        androidx.compose.ui.graphics.lerp(
+            neutral, Color(it),
+            if (isPeer) tk.glucodata.SensorVisuals.PEER_TEXT_BLEND
+            else tk.glucodata.SensorVisuals.PRIMARY_TEXT_BLEND,
+        )
+    } ?: tk.glucodata.ui.WearGlucoseColors.valueColor(primaryLaneValue(point, viewMode), isMmol, neutral)
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        identityArgb?.let {
-            Box(Modifier.padding(end = 4.dp).size(4.dp).background(Color(it), CircleShape))
-        }
         WearGlucoseValue(
             point = point,
             isMmol = isMmol,
             viewMode = viewMode,
-            style = readingValueStyle(viewMode),
-            primaryColor = tk.glucodata.ui.WearGlucoseColors.valueColor(
-                primaryLaneValue(point, viewMode), isMmol, MaterialTheme.colorScheme.onSurface,
-            ),
+            style = if (isPeer) readingValueStyle(
+                viewMode, MaterialTheme.typography.bodySmall, MaterialTheme.typography.labelSmall,
+            ) else readingValueStyle(viewMode),
+            primaryColor = valueColor,
         )
         TrendArrowCanvas(
             velocity = velocity,
             pulseKey = null,
             modifier = Modifier.padding(start = 4.dp).size(12.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = valueColor.copy(alpha = 0.7f),
         )
     }
 }
