@@ -80,6 +80,33 @@ constexpr int maxdays = 46;
 constexpr const int maxdaysDex = 12;
 
 constexpr const int maxdaysAccu = 15;
+constexpr const int maxdaysAir = 16;
+// Sensor kind of CareSens Air: stream libreversion, getSensorgen2() and the UI
+// kind. Upstream Juggluco uses 0x30, which is already AiDex's UI kind here.
+inline constexpr const int careSensAirKind = 0x60;
+
+// CareSens Air keeps two files next to info.dat: the sensor's calibration
+// parameters as read over BLE, and the vendor algorithm's running state.
+inline constexpr const char sensorInfoStr[] = "sensorInfo";
+inline constexpr const char generatedStr[] = "generated";
+
+// The CareSens Air QR payload in the canonical form PhotoScan hands to native:
+// GS 01 <gtin> 17 <expiry> 21 <serial> GS 240 <pin> GS 250 <sensor code>.
+// The record is stored verbatim in Info::airData; the BLE pairing PIN is read
+// back from it at a fixed offset, so the layout must not change.
+struct careSenseAirScan_t {
+  char start[3];
+  char gtin[14];
+  char tus17[2];
+  char expiry[6];
+  char tus21[2];
+  char serial[12];
+  char start2[4];
+  char pinCode[6];
+  char start3[4];
+  char sensorCode[16];
+};
+static_assert(sizeof(careSenseAirScan_t) == 69);
 
 constexpr const int stdMaxDaysSI = 24;
 constexpr const int maxdaysSI =
@@ -254,6 +281,9 @@ public:
         uint16_t wearduration2;
         uint8_t warmup2;
       };
+      struct { // CareSens Air, which uses wearduration/warmup instead
+        uint16_t askEarlier;
+      };
     };
     union {
       struct { // Libre 2
@@ -314,7 +344,10 @@ public:
     uint8_t customCalIndex; // 0=12H, 1=1D, 2=2D, 3=3D, 4=5D, 5=7D, 6=10D,
                             // 7=14D, 8=18D, 9=MAX
 
-    uint8_t reserved : 2;
+    // Upstream Juggluco keeps its air flag elsewhere; that bit is
+    // autoResetAlgorithm here, so CareSens Air takes a reserved bit.
+    bool air : 1;
+    uint8_t reserved : 1;
     // CLEAN REFACTOR: Use timestamp instead of bool for reset mode.
     // 0 = not in reset mode. Non-zero = timestamp when reset mode started.
     // Auto-expires after 30 min or when gap closes.
@@ -333,6 +366,10 @@ public:
     updatestate update[std::max(maxsendtohost, 8)];
     union {
       uint8_t kAuth[149];
+      struct {
+        careSenseAirScan_t airData;
+        char8_t reservedAir[149 - sizeof(careSenseAirScan_t)];
+      } __attribute__((packed));
       struct {
         uint32_t siIdlen;
         char8_t siId[68];
@@ -639,6 +676,8 @@ public:
       return 0x10;
     if (isAccuChek())
       return 0x20;
+    if (isAir())
+      return careSensAirKind;
     auto *info = getinfo();
     if (info && info->interval == interval5)
       return 3;
@@ -686,7 +725,7 @@ public:
   }
 
   int streamperhour() const {
-    if (isAccuChek() || isDexcom())
+    if (isAccuChek() || isDexcom() || isAir())
       return 12;
     else
       return 60;
@@ -758,7 +797,7 @@ public:
       info->streamingIsEnabled = val;
   }
   uint32_t getfirsttime() const {
-    if (isLibre()) {
+    if (isLibre() || isAir()) {
       uint32_t locfirstpos = getstarthistory() + 1;
       for (int pos = locfirstpos, end = std::min(getAllendhistory(), maxpos());
            pos < end; pos++) {
@@ -815,7 +854,7 @@ public:
     auto *info = getinfo();
     if (!info)
       return 14 * 24 * 60;
-    const int wear = (isLibre2() || isDexcom() || isAccuChek())
+    const int wear = (isLibre2() || isDexcom() || isAccuChek() || isAir())
                          ? info->wearduration
                          : info->wearduration2;
     if (isAiDex()) {
@@ -835,7 +874,7 @@ public:
     auto *info = getinfo();
     if (!info)
       return 60;
-    const int warmup = (isLibre2() || isAccuChek() || isDexcom())
+    const int warmup = (isLibre2() || isAccuChek() || isDexcom() || isAir())
                            ? info->warmup
                            : info->warmup2;
     if (warmup)
@@ -858,7 +897,7 @@ public:
       };
       return (maxSIhours * 60 - 19) * 60;
     }
-    if (isLibre3() || isAccuChek())
+    if (isLibre3() || isAccuChek() || isAir())
       return getweardurationSEC();
     return getweardurationSEC() + 12 * 60 * 60;
   }
@@ -1123,8 +1162,8 @@ public:
   void setnobluetooth() { getinfo()->bluestart = bluestartunknown; }
   bool hasbluetooth() const { return getinfo()->bluestart != bluestartunknown; }
   bool canusestreaming() const {
-    return isAccuChek() || isSibionics() || isLibre3() || hasbluetooth() ||
-           isDexcom();
+    return isAccuChek() || isSibionics() || isLibre3() || isAir() ||
+           hasbluetooth() || isDexcom();
     //    return  hasbluetooth();
   }
   const std::string_view othershortsensorname() const {
@@ -1173,6 +1212,8 @@ public:
         return std::string_view(sensordir.data() + sensordir.length() - 9, 9);
       if (isAiDex())
         return sensid();
+      if (isAir())
+        return std::string_view(sensordir.data() + sensordir.length() - 12, 12);
     }
     std::string_view sid = sensid();
     if (sid.length() == 11)
@@ -1318,20 +1359,21 @@ static int getgeneration(const char *info) {
 
   bool isDexcom() const { return getinfo()->dexcom; }
   bool isLibre3() const {
-    return !isAccuChek() && !isSibionics() && !isDexcom() &&
+    return !isAccuChek() && !isSibionics() && !isDexcom() && !isAir() &&
            (getinfo()->interval == interval5);
   }
   bool isLibre2() const {
-    return !(isAccuChek() || isSibionics() || isDexcom() ||
+    return !(isAccuChek() || isSibionics() || isDexcom() || isAir() ||
              getinfo()->interval == interval5);
   }
   bool isLibre() const {
-    return !(isSibionics() || isDexcom() || isAccuChek());
+    return !(isSibionics() || isDexcom() || isAccuChek() || isAir());
   }
   bool isAccuChek() const { return getinfo()->accuChek; }
   bool isAiDex() const { return getinfo()->aidex; }
+  bool isAir() const { return getinfo()->air; }
   int streaminterval() const {
-    const int res = (isDexcom() || isAccuChek()) ? 5 : 1;
+    const int res = (isDexcom() || isAccuChek() || isAir()) ? 5 : 1;
     return res;
   }
   /*
@@ -1475,6 +1517,39 @@ bool libreviewable() const {
 
     return true;
   };
+  static bool mkdatabaseAir(string_view sensordir, const careSenseAirScan_t &scan,
+                            uint32_t now) {
+    LOGGER("mkdatabaseAir %s\n", sensordir.data());
+    mkdir(sensordir.data(), 0700);
+    pathconcat infoname(sensordir, infopdat);
+    if (access(infoname, F_OK) != -1) {
+      Readall<uint8_t> inf(infoname);
+      if (inf.data() && inf.size() >= sizeof(Info)) {
+        const Info *in = reinterpret_cast<const Info *>(inf.data());
+        if (in->pollcount && in->starttime > 1700000000 && in->dupl > 0 &&
+            in->air)
+          return false;
+      }
+    }
+    Info inf{.starttime = now,
+             .lastscantime = now,
+             .starthistory = 0,
+             .endhistory = 0,
+             .scancount = 0,
+             .startid = 0,
+             .interval = interval5,
+             .dupl = 3,
+             .days = maxdaysAir,
+             .warmup = 30,
+             .wearduration = 21600,
+             .lastLifeCountReceived = 1,
+             .pollcount = 0,
+             .lockcount = 0,
+             .air = true};
+    inf.airData = scan;
+    writeall(infoname, &inf, sizeof(inf));
+    return true;
+  }
 
 #ifdef DEXCOM
   static bool mkdatabaseDex(string_view sensordir, string_view sensorgegs,
@@ -1680,7 +1755,7 @@ private:
         }
       }
     }
-    if (!(isAccuChek() || isSibionics() || isDexcom())) {
+    if (!(isAccuChek() || isSibionics() || isDexcom() || isAir())) {
       LOGGER("getinfo()->lastHistoricLifeCountReceivedPos=%d\n",
              getinfo()->lastHistoricLifeCountReceivedPos);
       if (!getinfo()->lastHistoricLifeCountReceivedPos)
@@ -2905,7 +2980,10 @@ public:
                offsetof(Info, deviceaddress), deviceaddresslen});
         }
       } else {
-        if (isAccuChek()) {
+        // CareSens Air's sensor start comes from the transmitter, as with
+        // Accu-Chek. Upstream also mirrors the sensorInfo file so a follower
+        // can take over the algorithm; that sync is not ported.
+        if (isAccuChek() || isAir()) {
           if (!getinfo()->update[ind].siStream && pollcount()) {
             updateStarttime = true;
             LOGAR("updateStream send starttime");
@@ -2964,7 +3042,7 @@ public:
       }
       if (sendhiststart)
         getinfo()->update[ind].sendhiststart = false;
-      if (isLibre3() || isDexcom()) {
+      if (isLibre3() || isDexcom() || isAir()) {
         int endhistory = getScanendhistory();
         if (oldsendhistory(pass, connect, ind, sensindex, true, endhistory))
           return 1;
@@ -3028,6 +3106,9 @@ public:
   std::vector<int> viewed;
   int getSiIndex() const { return getinfo()->lockcount; }
   void setSiIndex(int index) { getinfo()->lockcount = index; }
+  // CareSens Air: sequence number of the last record handed to the algorithm.
+  int getLastAir() const { return getinfo()->lockcount; }
+  void setLastAir(int index) { getinfo()->lockcount = index; }
 
   uint32_t receivehistory = 0;
   int retried = 0;
@@ -3117,6 +3198,9 @@ public:
     } else {
       if (isDexcom()) {
         if (pollcount() >= maxdexcount)
+          return false;
+      } else if (isAir()) {
+        if (pollcount() > 4320)
           return false;
       } else {
         /*

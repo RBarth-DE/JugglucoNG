@@ -8,6 +8,9 @@ public final class SensorSourceResolver {
     public static final int SENSOR_KIND_ACCUCHEK = 0x20;
     public static final int SENSOR_KIND_AIDEX = 0x30;
     public static final int SENSOR_KIND_DEXCOM = 0x40;
+    // careSensAirKind in cpp/SensorGlucoseData.hpp. Upstream Juggluco uses 0x30,
+    // which is SENSOR_KIND_AIDEX here.
+    public static final int SENSOR_KIND_CARESENS_AIR = 0x60;
 
     private SensorSourceResolver() {}
 
@@ -23,7 +26,7 @@ public final class SensorSourceResolver {
             case SENSOR_KIND_DEXCOM -> "G7";
             case SENSOR_KIND_SIBIONICS -> "GS1Sb";
             case SENSOR_KIND_ACCUCHEK -> "AccuChek";
-            case SENSOR_KIND_AIDEX, SENSOR_KIND_UNKNOWN -> "Libre2";
+            case SENSOR_KIND_AIDEX, SENSOR_KIND_CARESENS_AIR, SENSOR_KIND_UNKNOWN -> "Libre2";
             default -> "Libre2";
         };
     }
@@ -57,6 +60,7 @@ public final class SensorSourceResolver {
             case SENSOR_KIND_LIBRE3 -> SENSOR_KIND_LIBRE3;
             case SENSOR_KIND_SIBIONICS -> SENSOR_KIND_SIBIONICS;
             case SENSOR_KIND_ACCUCHEK -> SENSOR_KIND_ACCUCHEK;
+            case SENSOR_KIND_CARESENS_AIR -> SENSOR_KIND_CARESENS_AIR;
             case SENSOR_KIND_AIDEX -> SENSOR_KIND_AIDEX;
             case SENSOR_KIND_DEXCOM -> SENSOR_KIND_DEXCOM;
             default -> SENSOR_KIND_UNKNOWN;
@@ -68,6 +72,7 @@ public final class SensorSourceResolver {
             case SENSOR_KIND_LIBRE3 -> "Libre3";
             case SENSOR_KIND_SIBIONICS -> "GS1Sb";
             case SENSOR_KIND_ACCUCHEK -> "AccuChek";
+            case SENSOR_KIND_CARESENS_AIR -> "CareSensAir";
             case SENSOR_KIND_AIDEX -> "AiDex";
             case SENSOR_KIND_DEXCOM -> "G7";
             case SENSOR_KIND_LIBRE2 -> "Libre2";

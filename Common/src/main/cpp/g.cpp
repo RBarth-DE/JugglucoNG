@@ -489,6 +489,9 @@ static jint sensorKindForUi(const SensorGlucoseData *sens) {
   if (sens->isAccuChek()) {
     return 0x20;
   }
+  if (sens->isAir()) {
+    return careSensAirKind;
+  }
   if (sens->isAiDex()) {
     return 0x30;
   }
@@ -779,6 +782,10 @@ extern "C" JNIEXPORT jlong JNICALL fromjava(getdataptr)(JNIEnv *env, jclass cl,
             LOGGER("getdataptr(%.*s) AccuChek\n", (int)sensor.length(),
                    sensor.data());
             candidate = new accustream(sensorindex, sens);
+          } else if (sens->isAir()) {
+            LOGGER("getdataptr(%.*s) Air\n", (int)sensor.length(),
+                   sensor.data());
+            candidate = new airstream(sensorindex, sens);
           } else if (sens->isAiDex()) {
             LOGGER("getdataptr(%.*s) AiDex\n", (int)sensor.length(),
                    sensor.data());
