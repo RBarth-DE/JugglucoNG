@@ -33,6 +33,8 @@ jobs:
   build:
     needs: prepare
     uses: ./.github/workflows/signed-build.yml
+    # Required for the called job to resolve protected environment secrets.
+    secrets: inherit
     with:
       target: all
   publish:

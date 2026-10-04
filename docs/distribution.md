@@ -57,6 +57,12 @@ permissions, removes it on exit, and passes the existing Gradle properties via
 step-local environment variables. No signing material reaches the publication
 job or artifacts.
 
+Both callers of `signed-build.yml` must retain `secrets: inherit`: GitHub currently
+resolves the reusable job's environment secrets as empty without explicit secret
+forwarding. Keep signing values in `production-signing`; its main-only policy and
+the reusable job's trusted-main guard still apply. Publication remains a separate
+job without the signing environment.
+
 `DISTRIBUTION_LICENSE_APPROVED=false` is already set in that environment. Change
 it to `true` only after confirming redistribution rights for the JNI inputs below.
 This blocks new binary uploads, including Actions artifacts. No new binary archive

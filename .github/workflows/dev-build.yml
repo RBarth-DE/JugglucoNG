@@ -33,5 +33,7 @@ jobs:
     needs: request
     if: needs.request.outputs.accepted == 'true'
     uses: ./.github/workflows/signed-build.yml
+    # Required for the called job to resolve protected environment secrets.
+    secrets: inherit
     with:
       target: ${{ needs.request.outputs.target }}
