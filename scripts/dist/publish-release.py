@@ -48,30 +48,34 @@ def bootstrap():
     tracked_source(sha)
 
 
-def publish():
-    tag = os.environ['TAG']
-    repo = os.environ['GITHUB_REPOSITORY']
-    sha = os.environ['GITHUB_SHA']
-    if repo != REPO or tag != dist.version()[0]:
-        raise ValueError('Release repository/version mismatch')
-    tracked_source(sha)
+def verified_assets():
+    """The same five-asset contract for regular releases and nightly prereleases."""
     directory = dist.ROOT / 'build/dist/all'
     # Reuse the existing updater format. Verify first to avoid stale/partial inputs.
     dist.verify_set(directory, 'all')
     content = subprocess.check_output([str(dist.ROOT / 'scripts/make-update-manifest.sh'), str(directory)],
                                       cwd=dist.ROOT, text=True)
     (directory / 'update-manifest.json').write_text(content)
-    subprocess.run([sys.executable, str(dist.ROOT / 'scripts/dist/dist.py'), 'release-check', '--tag', tag],
+    subprocess.run([sys.executable, str(dist.ROOT / 'scripts/dist/dist.py'), 'release-check', '--tag', dist.version()[0]],
                    cwd=dist.ROOT, check=True)
-    preflight()  # Repeat after build/approval, just before publishing.
+    return directory
+
+
+def publish_assets(tag, sha, title, prerelease=False, notes_file=None):
+    repo = os.environ['GITHUB_REPOSITORY']
+    if repo != REPO:
+        raise ValueError('Release repository mismatch')
+    directory = dist.ROOT / 'build/dist/all'
     # Reserve the exact SHA atomically; an existing/racing tag fails closed.
     subprocess.run(['gh', 'api', '--method', 'POST', f'repos/{repo}/git/refs', '--input', '-'],
                    input=json.dumps({'ref': 'refs/tags/' + tag, 'sha': sha}), text=True, cwd=dist.ROOT, check=True)
-    subprocess.run(['gh', 'release', 'create', tag, '--repo', repo, '--verify-tag', '--title', tag,
-                    '--generate-notes', '--draft'], cwd=dist.ROOT, check=True)
+    create = ['gh', 'release', 'create', tag, '--repo', repo, '--verify-tag', '--target', sha,
+              '--title', title, '--draft']
+    create += ['--notes-file', str(notes_file)] if notes_file else ['--generate-notes']
+    subprocess.run(create, cwd=dist.ROOT, check=True)
     assets = [str(p) for p in sorted(directory.glob('*.apk'))] + [str(directory / 'update-manifest.json')]
     subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, *assets], cwd=dist.ROOT, check=True)
-    flags = ['--prerelease', '--latest=false'] if os.environ.get('PRERELEASE') == 'true' else ['--prerelease=false', '--latest']
+    flags = ['--prerelease', '--latest=false'] if prerelease else ['--prerelease=false', '--latest']
     subprocess.run(['gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', *flags], cwd=dist.ROOT, check=True)
     message = f'Published https://github.com/{repo}/releases/tag/{tag}'
     print(message)
@@ -79,6 +83,18 @@ def publish():
     if summary:
         with Path(summary).open('a') as out:
             out.write(message + '\n')
+
+
+def publish():
+    tag = os.environ['TAG']
+    repo = os.environ['GITHUB_REPOSITORY']
+    sha = os.environ['GITHUB_SHA']
+    if repo != REPO or tag != dist.version()[0]:
+        raise ValueError('Release repository/version mismatch')
+    tracked_source(sha)
+    verified_assets()
+    preflight()  # Repeat after build/approval, just before publishing.
+    publish_assets(tag, sha, tag, prerelease=os.environ.get('PRERELEASE') == 'true')
 
 
 def main():
