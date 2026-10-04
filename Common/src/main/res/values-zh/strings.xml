@@ -599,6 +599,8 @@
     <string name="dexcom_setup_title">Dexcom 设置</string>
     <string name="scan_dexcom">扫描 Dexcom</string>
     <string name="dexcom_scan_instruction">扫描 Dexcom 传感器上的 DataMatrix 代码</string>
+    <string name="dexcom_pairing_code_label">4 位配对码</string>
+    <string name="dexcom_pairing_code_instruction">输入传感器助针器上印刷的 4 位配对码。</string>
     <string name="libre_setup_title">Libre 设置</string>
     <string name="scan_libre_sensor">扫描 Libre 传感器</string>
     <string name="libre_nfc_instruction">将手机靠近传感器进行扫描</string>

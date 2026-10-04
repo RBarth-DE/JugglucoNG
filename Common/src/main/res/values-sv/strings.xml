@@ -592,6 +592,8 @@
     <string name="dexcom_setup_title">Dexcom Installation</string>
     <string name="scan_dexcom">Skanna Dexcom</string>
     <string name="dexcom_scan_instruction">Skanna datamatrix-koden på Dexcom-sensorn</string>
+    <string name="dexcom_pairing_code_label">4-siffrig parkopplingskod</string>
+    <string name="dexcom_pairing_code_instruction">Ange den 4-siffriga parkopplingskoden som står på sensorapplikatorn.</string>
     <string name="libre_setup_title">Libre Installation</string>
     <string name="scan_libre_sensor">Skanna Libre Sensor</string>
     <string name="libre_nfc_instruction">Håll telefonen mot sensorn för att skanna</string>

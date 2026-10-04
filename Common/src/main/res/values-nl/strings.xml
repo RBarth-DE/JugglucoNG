@@ -684,6 +684,8 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
     <string name="dexcom_setup_title">Dexcom Installatie</string>
     <string name="scan_dexcom">Scan Dexcom</string>
     <string name="dexcom_scan_instruction">Scan de datamatrix op je Dexcom-sensor</string>
+    <string name="dexcom_pairing_code_label">4-cijferige koppelcode</string>
+    <string name="dexcom_pairing_code_instruction">Voer de 4-cijferige koppelcode in die op de sensorapplicator staat.</string>
     <string name="libre_setup_title">Libre Installatie</string>
     <string name="scan_libre_sensor">Scan Libre Sensor</string>
     <string name="libre_nfc_instruction">Houd je telefoon bij de sensor om te scannen</string>
