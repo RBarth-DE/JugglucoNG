@@ -108,6 +108,12 @@ class ApkVerification(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'certificate mismatch'):
                 self.verify(certificate)
 
+    def test_controller_pin_overrides_untrusted_certificate_file(self):
+        (self.root / 'scripts/dist/production-cert.sha256').write_text('b' * 64)
+        with patch.object(dist.subprocess, 'check_output', return_value='Signer #1 certificate SHA-256 digest: ' + 'b' * 64):
+            with self.assertRaisesRegex(ValueError, 'certificate mismatch'):
+                dist.verify_apk(self.apk, 'mobile', 'release', expected_certificate=self.cert)
+
     def test_wrong_version_package_debuggable_rejected(self):
         for badging in [self.badging.replace('1023', '1022'), self.badging.replace('tk.glucodata.ng', 'tk.glucodata.ng.dub'), self.badging + '\napplication-debuggable']:
             with self.assertRaises(ValueError):

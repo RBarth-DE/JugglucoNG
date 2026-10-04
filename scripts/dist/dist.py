@@ -169,8 +169,8 @@ def sdk_tool(name):
     raise ValueError(f'Android SDK tool not found: {name}')
 
 
-def verify_apk(apk, flavor, build_type):
-    cert = (ROOT / 'scripts/dist/production-cert.sha256').read_text().strip()
+def verify_apk(apk, flavor, build_type, expected_certificate=None):
+    cert = expected_certificate or (ROOT / 'scripts/dist/production-cert.sha256').read_text().strip()
     result = subprocess.check_output([sdk_tool('apksigner'), 'verify', '--print-certs', str(apk)], text=True)
     found = re.findall(r'^(?:Signer #\d+|V\d+ Signer):? certificate SHA-256 digest: ([0-9a-f]+)$', result, re.M)
     if not found or set(found) != {cert}:
@@ -199,12 +199,12 @@ def verify_apk(apk, flavor, build_type):
     print(f'Verified production signature, version and JNI payload: {apk.name}', file=sys.stderr)
 
 
-def verify_set(directory, target):
+def verify_set(directory, target, expected_certificate=None):
     expected = {filename(f, b) for f, b in TARGETS[target]}
     if {p.name for p in directory.glob('*.apk')} != expected:
         raise ValueError('Distribution APK set mismatch')
     for flavor, build_type in TARGETS[target]:
-        verify_apk(directory / filename(flavor, build_type), flavor, build_type)
+        verify_apk(directory / filename(flavor, build_type), flavor, build_type, expected_certificate)
 
 
 def stage(target):

@@ -1,4 +1,5 @@
-# Signing runs code from main. Changes to the trust boundary need owner review.
+# Signing runs main or an immutable PR snapshot explicitly approved by the owner.
+# Changes to the trust boundary need owner review.
 /.github/ @ctqvva
 /scripts/build-dist.sh @ctqvva
 /scripts/restore-build-inputs.sh @ctqvva
