@@ -158,6 +158,35 @@ class CustomGlucoseNotificationTests {
         assertEquals(View.VISIBLE, light.findViewById<ImageView>(R.id.notification_glucose_image).visibility)
     }
 
+    @Test fun arrowAndSensorGapsScaleWithTheReadoutAndPreserveVectorSize() {
+        for (system in listOf(true, false)) {
+            var previousGap = 0
+            var previousSensorGap = 0
+            for (scale in listOf(0.6f, 1f, 1.5f)) {
+                val root = values(scale = scale, systemFont = system).apply(app, null)
+                val density = app.resources.displayMetrics.density
+                root.measure(View.MeasureSpec.makeMeasureSpec((500*density).toInt(), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+                val arrow = root.findViewById<ImageView>(R.id.notification_arrow)
+                val peerArrow = root.findViewById<ImageView>(R.id.notification_peer_arrow)
+                val peer = root.findViewById<View>(R.id.notification_peer_group)
+                assertTrue(arrow.paddingLeft > previousGap)
+                assertTrue(peer.paddingLeft > previousSensorGap)
+                assertEquals(arrow.paddingLeft, peerArrow.paddingLeft)
+                // The added optical gap occupies width, not the vector's square.
+                assertEquals(arrow.height, arrow.width - arrow.paddingLeft)
+                assertEquals(peerArrow.height, peerArrow.width - peerArrow.paddingLeft)
+                previousGap = arrow.paddingLeft
+                previousSensorGap = peer.paddingLeft
+            }
+            val compact = values(expanded = false, scale = 0.6f, systemFont = system).apply(app, null)
+            val expanded = values(scale = 0.6f, systemFont = system).apply(app, null)
+            assertTrue(compact.findViewById<ImageView>(R.id.notification_arrow).paddingLeft <=
+                    expanded.findViewById<ImageView>(R.id.notification_arrow).paddingLeft)
+        }
+    }
+
     @Test fun notificationKeepsCustomContentAndActualTimestampWithUnitlessFallback() {
         val builder = Notification.Builder(app, "glucose").setSmallIcon(android.R.drawable.ic_dialog_info)
             .setWhen(123456L).setShowWhen(true).setOnlyAlertOnce(true)

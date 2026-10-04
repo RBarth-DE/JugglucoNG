@@ -39,8 +39,13 @@ final class CustomGlucoseNotification {
         bindValue(context, views, R.id.notification_glucose, R.id.notification_glucose_image,
                 styledValue(primary, secondaryColor, tertiaryColor), primaryColor, textSize, textUnit,
                 textPixels, weight, systemFont);
+        // Preserve the old strip's optical spacing: 2.5 units beside arrows,
+        // 8 between sensors, relative to its 22-unit primary text. Fixed dp
+        // margins otherwise dominate the compact/small-font readout.
+        int arrowGap = Math.max(1, Math.round(textPixels * 2.5f / 22f));
+        int sensorGap = Math.max(1, Math.round(textPixels * 8f / 22f));
         bindArrow(context, views, R.id.notification_arrow, rate, arrowColor,
-                textPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
+                textPixels * 0.8f * safeArrowScale, arrowGap, showArrow, largeArrow);
         // Clear children before replacing peers so reapplication cannot retain an old sensor.
         views.removeAllViews(R.id.notification_peers);
         if (peers != null) for (NotificationChartDrawer.ValueItem peer : peers) {
@@ -48,12 +53,13 @@ final class CustomGlucoseNotification {
             int color = SensorVisuals.blendArgb(night ? Color.WHITE : Color.BLACK,
                     peer.color, SensorVisuals.PEER_TEXT_BLEND);
             RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.notification_phone_peer);
+            startPadding(context, item, R.id.notification_peer_group, sensorGap);
             float peerPixels = textPixels * 0.78f;
             bindValue(context, item, R.id.notification_peer_value, R.id.notification_peer_image,
                     styledValue(peer.text, secondaryColor, tertiaryColor), color, textSize * 0.78f, textUnit,
                     peerPixels, weight, systemFont);
             bindArrow(context, item, R.id.notification_peer_arrow, peer.rate, color,
-                    peerPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
+                    peerPixels * 0.8f * safeArrowScale, arrowGap, showArrow, largeArrow);
             views.addView(R.id.notification_peers, item);
         }
         boolean hasStatus = status != null && status.length() > 0;
@@ -114,7 +120,7 @@ final class CustomGlucoseNotification {
     }
 
     private static void bindArrow(Context context, RemoteViews views, int id, float rate, int color,
-            float pixels, boolean enabled, boolean large) {
+            float pixels, int gap, boolean enabled, boolean large) {
         boolean visible = enabled && Float.isFinite(rate);
         views.setViewVisibility(id, visible ? View.VISIBLE : View.GONE);
         if (!visible) return;
@@ -127,12 +133,19 @@ final class CustomGlucoseNotification {
         views.setInt(id, "setImageLevel", Math.round((angle + 90f) * 10000f / 180f));
         views.setInt(id, "setColorFilter", color);
         int size = Math.max(1, Math.round(pixels));
-        views.setInt(id, "setMaxWidth", size);
+        startPadding(context, views, id, gap);
+        // Max width includes the gap so padding does not shrink the vector itself.
+        views.setInt(id, "setMaxWidth", size + gap);
         views.setInt(id, "setMaxHeight", size);
         int description = angle == 0f ? R.string.notification_trend_steady
                 : rate > 0 ? (doubled ? R.string.notification_trend_rising_fast : R.string.notification_trend_rising)
                 : (doubled ? R.string.notification_trend_falling_fast : R.string.notification_trend_falling);
         views.setContentDescription(id, context.getString(description));
+    }
+
+    private static void startPadding(Context context, RemoteViews views, int id, int pixels) {
+        boolean rtl = context.getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        views.setViewPadding(id, rtl ? 0 : pixels, 0, rtl ? pixels : 0, 0);
     }
 
     private static String valueDescription(CharSequence primary,
