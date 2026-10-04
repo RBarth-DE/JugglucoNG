@@ -1,0 +1,37 @@
+name: Signed dev build
+run-name: Signed dev build requested by ${{ github.actor }}
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Distribution target (trusted main only)
+        type: choice
+        options: [phone, phone-all, wear, wear-all, all]
+        default: phone
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+concurrency:
+  group: signed-dev-${{ github.actor }}
+  cancel-in-progress: false
+jobs:
+  request:
+    if: github.repository == 'ctqvva/JugglucoNG' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      accepted: ${{ steps.request.outputs.accepted }}
+      target: ${{ steps.request.outputs.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: request
+        name: Validate request (owner and JetFoxy user IDs)
+        run: python3 scripts/dist/request.py >> "$GITHUB_OUTPUT"
+  build:
+    needs: request
+    if: needs.request.outputs.accepted == 'true'
+    uses: ./.github/workflows/signed-build.yml
+    with:
+      target: ${{ needs.request.outputs.target }}

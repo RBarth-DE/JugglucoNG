@@ -17,6 +17,8 @@ local.properties
 
 # Keystores (keep them private)
 *.jks
+*.keystore
+/.local/
 
 # Misc
 *.iml
@@ -61,3 +63,6 @@ Common/printmappingout.txt
 /Common/mobile/
 /Common/wear/
 /update-manifest.json
+
+__pycache__/
+*.pyc

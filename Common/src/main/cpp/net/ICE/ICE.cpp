@@ -1121,7 +1121,7 @@ static std::pair<const char *,const char *> getloginpass(char *twiliooutput,cons
         }
      return {};
     }
-#if __has_include("twilio.local.hpp")
+#if !defined(JUGGLUCO_DISTRIBUTION) && __has_include("twilio.local.hpp")
 #include "twilio.local.hpp"
 #define JUGGLUCO_HAS_TWILIO_TOKEN 1
 #else
@@ -1235,7 +1235,7 @@ juice_agent *createAgent(int allindex) {
     LOGGER("createAgent(%d)\n",allindex);
               
     static   juice_turn_server_t default_turn_servers[]{
-#if __has_include("turnservers.local.hpp")
+#if !defined(JUGGLUCO_DISTRIBUTION) && __has_include("turnservers.local.hpp")
         #include "turnservers.local.hpp"
 #else
         #include "turnservers.hpp"
