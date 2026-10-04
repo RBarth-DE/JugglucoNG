@@ -83,9 +83,20 @@ class AirGattCallback extends SuperGattCallback {
     private boolean receiveNotes = false;
     final private String AppID = "csair";
 
+    private boolean isCurrentGatt(BluetoothGatt gatt) {
+        return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
+    }
+
+    private synchronized void enableNotificationIfCurrent(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+        if (isCurrentGatt(gatt))
+            enableNotification(gatt, characteristic);
+    }
+
     @SuppressLint("MissingPermission")
     @Override
-    public void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
+    public synchronized void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         BluetoothGattCharacteristic characteristic = bluetoothGattDescriptor.getCharacteristic();
         if (doLog) {
             byte[] value = bluetoothGattDescriptor.getValue();
@@ -167,13 +178,11 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
+    public synchronized void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
         noteFirstGattCallback("onConnectionStateChange", bluetoothGatt);
-        if (stop) {
-            constatstatusstr = "Stopped";
-            if (doLog) {Log.i(LOG_ID, "onConnectionStateChange stop==true");}
+        if (!acceptConnectionAttemptCallback(bluetoothGatt, newState) || dataptr == 0L)
             return;
-        }
+        super.onConnectionStateChange(bluetoothGatt, status, newState);
         long tim = System.currentTimeMillis();
         if (doLog) {
             final var bondstate = bluetoothGatt.getDevice().getBondState();
@@ -285,7 +294,9 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
+    public synchronized void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         if (doLog) {Log.i(LOG_ID, "BLE onServicesDiscovered, status: " + status);}
         if (status == GATT_SUCCESS) {
             if (!discover(bluetoothGatt))
@@ -296,7 +307,9 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public void onCharacteristicRead(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+    public synchronized void onCharacteristicRead(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         switch (status) {
             case GATT_SUCCESS:
                 if (doLog) {Log.i(LOG_ID, "onCharacteristicRead success");}
@@ -320,7 +333,7 @@ class AirGattCallback extends SuperGattCallback {
         if (doLog)
             Log.i(LOG_ID, "afterReads");
         if (swRevision.compareTo("1.5") >= 0) {
-            Applic.scheduler.schedule(() -> {enableNotification(bluetoothGatt, charact22);}, 100, TimeUnit.MILLISECONDS);
+            Applic.scheduler.schedule(() -> enableNotificationIfCurrent(bluetoothGatt, charact22), 100, TimeUnit.MILLISECONDS);
             return;
         }
         enableDataOrBond(bluetoothGatt);
@@ -336,11 +349,16 @@ class AirGattCallback extends SuperGattCallback {
         }
         if (device.getBondState() == BOND_BONDED) {
             wrotepass[0] = System.currentTimeMillis();
-            Applic.scheduler.schedule(() -> {enableNotification(bluetoothGatt, charact11);}, 100, TimeUnit.MILLISECONDS);
+            Applic.scheduler.schedule(() -> enableNotificationIfCurrent(bluetoothGatt, charact11), 100, TimeUnit.MILLISECONDS);
             return;
         }
         Log.i(LOG_ID, "createBond");
-        Applic.postDelayed(device::createBond, 1000L);
+        Applic.postDelayed(() -> {
+            synchronized (this) {
+                if (isCurrentGatt(bluetoothGatt))
+                    device.createBond();
+            }
+        }, 1000L);
     }
 
     @SuppressLint("MissingPermission")
@@ -410,7 +428,9 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public void onCharacteristicWrite(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+    public synchronized void onCharacteristicWrite(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         if (doLog)
             showCharacter("onCharacteristicWrite " + bluetoothGatt.getDevice().getAddress() + " status:" + status + " ", bluetoothGattCharacteristic);
         receiveNotes = status == GATT_SUCCESS;
@@ -723,7 +743,9 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public void onCharacteristicChanged(@NonNull BluetoothGatt bluetoothGatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
+    public synchronized void onCharacteristicChanged(@NonNull BluetoothGatt bluetoothGatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         final String uuidstr = bluetoothGattCharacteristic.getUuid().toString();
         if (doLog)
             Log.showbytes(LOG_ID + " receiveNotes=" + receiveNotes + " onCharacteristicChanged UUID: " + uuidstr, value);
@@ -744,7 +766,9 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public void onMtuChanged(BluetoothGatt bluetoothGatt, int mtu, int status) {
+    public synchronized void onMtuChanged(BluetoothGatt bluetoothGatt, int mtu, int status) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
         if (status == GATT_SUCCESS) {
             if (doLog)
                 Log.i(LOG_ID, "onMtuChanged " + mtu + " SUCCESS");
@@ -772,7 +796,9 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public boolean pairingRequest() {
+    public synchronized boolean pairingRequest() {
+        if (stop || dataptr == 0L)
+            return false;
         final BluetoothDevice device = mActiveBluetoothDevice;
         if (device == null) {
             Log.e(LOG_ID, "pairingRequest mActiveBluetoothDevice==null");
@@ -787,10 +813,10 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public void bonded() {
+    public synchronized void bonded() {
         wrotepass[0] = System.currentTimeMillis();
         final var gatt = mBluetoothGatt;
-        if (gatt != null && charact11 != null)
+        if (isCurrentGatt(gatt) && charact11 != null)
             enableNotification(gatt, charact11);
     }
 
@@ -845,7 +871,7 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    void free() {
+    synchronized void free() {
         cancelalarm();
         unbond();
         super.free();

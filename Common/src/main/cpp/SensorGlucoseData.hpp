@@ -92,6 +92,7 @@ inline constexpr const char generatedStr[] = "generated";
 
 // The CareSens Air QR payload in the canonical form PhotoScan hands to native:
 // GS 01 <gtin> 17 <expiry> 21 <serial> GS 240 <pin> GS 250 <sensor code>.
+// A code without AI 01 uses zero-filled GTIN storage; it is not sensor identity.
 // The record is stored verbatim in Info::airData; the BLE pairing PIN is read
 // back from it at a fixed offset, so the layout must not change.
 struct careSenseAirScan_t {
@@ -281,7 +282,8 @@ public:
         uint16_t wearduration2;
         uint8_t warmup2;
       };
-      struct { // CareSens Air, which uses wearduration/warmup instead
+      // Air alone uses askEarlier; its wear/warmup live in the first union.
+      struct { // Do not read wearduration2/warmup2 for an Air sensor.
         uint16_t askEarlier;
       };
     };
@@ -3106,7 +3108,7 @@ public:
   std::vector<int> viewed;
   int getSiIndex() const { return getinfo()->lockcount; }
   void setSiIndex(int index) { getinfo()->lockcount = index; }
-  // CareSens Air: sequence number of the last record handed to the algorithm.
+  // Air alone uses lockcount as its algorithm cursor; never call SI accessors on it.
   int getLastAir() const { return getinfo()->lockcount; }
   void setLastAir(int index) { getinfo()->lockcount = index; }
 

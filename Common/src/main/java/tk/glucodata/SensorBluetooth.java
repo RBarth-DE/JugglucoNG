@@ -2059,6 +2059,8 @@ public class SensorBluetooth {
                     }
                 }
             };
+            // Protected system broadcasts are exempt from Android 14's export-flag
+            // requirement. NOT_EXPORTED would also reject the Bluetooth process.
             Applic.app.registerReceiver(pairingRequestReceiver,
                     new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST));
         } catch (Throwable e) {

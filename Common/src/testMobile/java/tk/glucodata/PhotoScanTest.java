@@ -113,6 +113,29 @@ public class PhotoScanTest {
     }
 
     @Test
+    public void careSensAirAcceptsUpstreams53ByteCodeWithoutGtin() {
+        String shortCode = GS + "17271231" + "21" + AIR_SERIAL
+                + GS + "240" + AIR_PIN + GS + "250" + AIR_CODE;
+        String stored = AIR_CANONICAL.replace(AIR_GTIN, "00000000000000");
+
+        assertEquals(53, shortCode.length());
+        assertEquals(stored, PhotoScan.normalizeScanPayload(shortCode, REQUEST_BARCODE));
+        // The Bluetooth PIN keeps its fixed native offset even without AI 01.
+        assertEquals(AIR_PIN, stored.substring(43, 49));
+        assertEquals(stored, PhotoScan.normalizeScanPayload(shortCode.replace(GS, ""), REQUEST_BARCODE));
+    }
+
+    @Test
+    public void careSensAirMissingGtinStillRequiresAllFourAirFields() {
+        String shortCode = GS + "17271231" + "21" + AIR_SERIAL
+                + GS + "240" + AIR_PIN + GS + "250" + AIR_CODE;
+
+        assertNull(PhotoScan.buildCareSensAirPayload(shortCode.replace(GS + "240" + AIR_PIN, "")));
+        assertNull(PhotoScan.buildCareSensAirPayload(shortCode + GS + "11260101"));
+        assertNull(PhotoScan.buildCareSensAirPayload(shortCode.replace(AIR_SERIAL, "short")));
+    }
+
+    @Test
     public void careSensAirRestoresSeparatorsTheScannerDropped() {
         String leadingDropped = AIR_CANONICAL.substring(1);
         String allDropped = AIR_CANONICAL.replace(GS, "");

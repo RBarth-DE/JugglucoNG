@@ -27,6 +27,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <mutex>
 #include <stdint.h>
 #include <jni.h>
 #include "logs.hpp"
@@ -48,6 +49,12 @@ typedef unsigned char (*air1_opcal4_algorithm_t)(
     air1_opcal4_debug_t *);
 static air1_opcal4_algorithm_t air1_opcal4_algorithm;
 static bool getlibfuncs() {
+  // Several Air sensors can request the library concurrently. Cache success,
+  // but let the next record retry a failed load or symbol lookup.
+  static std::mutex mutex;
+  const std::lock_guard lock(mutex);
+  if (air1_opcal4_algorithm)
+    return true;
   std::string_view libcal{"/libCALCULATION.so"};
   void *handle = openlib(libcal);
   if (!handle) {
@@ -58,6 +65,7 @@ static bool getlibfuncs() {
   air1_opcal4_algorithm = (air1_opcal4_algorithm_t)dlsym(handle, str);
   if (!air1_opcal4_algorithm) {
     LOGGER("dlsym %s failed: %s\n", str, dlerror());
+    dlclose(handle);
     return false;
   }
   return true;
@@ -241,8 +249,7 @@ static jlong airProcessData(airstream *sdata, const jbyte *indata, int arlen,
   }
   ++sdata->tmpiter;
   if (!air->deviceErrorCode) {
-    static const bool haslibs = getlibfuncs();
-    if (!haslibs) {
+    if (!getlibfuncs()) {
       // Keep the last sequence number where it is: once the library is
       // installed, the transmitter resends these records.
       LOGAR("airProcessData: libCALCULATION.so missing, no glucose");

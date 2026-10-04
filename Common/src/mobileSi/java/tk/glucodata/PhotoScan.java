@@ -223,7 +223,7 @@ public class PhotoScan {
         return text.endsWith("MirrorJuggluco") || text.contains("\"port\"");
     }
 
-    // CareSens Air: GTIN company prefix 880 6712 (i-SENS) plus four AIs whose lengths
+    // CareSens Air: optional i-SENS GTIN plus four AIs whose lengths
     // upstream Juggluco requires exactly. AI 21, 240 and 250 are variable length in GS1,
     // so decoders that drop the GS separators are handled by these lengths.
     private static final String CARESENS_AIR_COMPANY = "8806712";
@@ -270,17 +270,22 @@ public class PhotoScan {
             values[field] = text.substring(pos, pos + length);
             pos += length;
         }
-        for (String value : values) {
-            if (value == null) {
+        // Upstream also accepts the 53-byte form containing only AIs 17/21/240/250.
+        for (int i = 1; i < values.length; i++) {
+            if (values[i] == null) {
                 return null;
             }
         }
         final String gtin = values[0];
-        if (!gtin.substring(1, 8).equals(CARESENS_AIR_COMPANY) || !isDigits(gtin) || !isDigits(values[1])
+        if ((gtin != null && (!gtin.substring(1, 8).equals(CARESENS_AIR_COMPANY) || !isDigits(gtin)))
+                || !isDigits(values[1])
                 || !isPrintable(values[2]) || !isPrintable(values[3]) || !isPrintable(values[4])) {
             return null;
         }
-        return GROUP_SEPARATOR + "01" + gtin + "17" + values[1] + "21" + values[2]
+        // Keep the persisted record and PIN offset unchanged. Zeros only pad the
+        // absent GTIN; identity still comes from expiry + serial, as upstream.
+        return GROUP_SEPARATOR + "01" + (gtin != null ? gtin : "00000000000000")
+                + "17" + values[1] + "21" + values[2]
                 + GROUP_SEPARATOR + "240" + values[3] + GROUP_SEPARATOR + "250" + values[4];
     }
 
