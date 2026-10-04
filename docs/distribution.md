@@ -37,6 +37,8 @@ both ABIs. Additional Gradle options can follow the target, e.g. `--offline
 The environments are configured in the repository:
 
 - `production-signing`: **main branch only**, four signing secrets, licensing flag.
+- `production-pr-review`: **main controller only**, approval by `ctqvva`, admin
+  bypass disabled, **no secrets**. Approval covers one immutable PR source snapshot.
 - `release-publication`: **main branch only**, approval by `ctqvva`, admin bypass
   disabled. Self approval is allowed so the sole owner can request and approve.
 
@@ -63,26 +65,53 @@ forwarding. Keep signing values in `production-signing`; its main-only policy an
 the reusable job's trusted-main guard still apply. Publication remains a separate
 job without the signing environment.
 
-`DISTRIBUTION_LICENSE_APPROVED=false` is already set in that environment. Change
-it to `true` only after confirming redistribution rights for the JNI inputs below.
+Set `DISTRIBUTION_LICENSE_APPROVED=true` in that environment only after confirming
+redistribution rights for the JNI inputs below (the owner has enabled it).
 This blocks new binary uploads, including Actions artifacts. No new binary archive
 or keystore was uploaded while setting up the pipeline.
 
 ## Request a signed dev build
 
-Use **Actions → Signed dev build → Run workflow**, branch **main**, then choose
-one of the five targets. Or:
+Use **Actions → Signed dev build → Run workflow**, branch **main**, choose
+one of the five targets and optionally enter a PR number. Empty PR number builds
+main. For example:
 
 ```sh
 gh workflow run dev-build.yml --ref main -f target=phone
+gh workflow run dev-build.yml --ref main -f target=phone -f pr_number=547
 ```
 
 JetFoxy has repository read access and does not need write access. The owner and
 JetFoxy can post an exact `/build-dist phone` (or another target) comment on any
 issue or PR. The allowlist uses immutable GitHub user IDs in
 `scripts/dist/request.py`. Other comments are ignored. Comments are parsed as
-JSON data; they never become shell code or supply a source ref. Even a comment
-on a fork PR builds only the default branch commit, never the PR code.
+JSON data; they never become shell code or supply a source ref. A comment on a
+PR requests **that PR's exact head**, including fork PRs; a comment on an ordinary
+issue requests main. Closed PRs, non-main targets and merge conflicts are rejected.
+
+For a PR build, open the run, inspect the source SHA linked in the request summary
+and approval job, then choose **Review deployments → production-pr-review →
+Approve and deploy**. Only the owner can approve. Review the **entire snapshot**,
+including Gradle, shell/native build code, submodules and dependencies: approving
+it explicitly trusts that code with the production signing key. Approval of
+ordinary PR CI is separate and grants no production signing access. The workflow
+definition/controller always comes from main, not the PR.
+
+The PR must remain open at the captured head/repository; changes while waiting
+or building reject the run. Request again for each revision: an old approval never
+selects a newer head. The APK tests the PR tip, **not** a synthetic merge with
+newer main; rebase first when integration with current main matters. The signing
+job uses the existing four environment secrets and canonical `build-dist.sh`/
+Gradle signing. A trusted-main verifier independently checks the production pin,
+package/version, both ARM ABIs and inventoried JNI bytes before artifact upload.
+
+Artifacts are named `distribution-pr547-phone-<full-head-SHA>` and contain APKs
+plus `build-info.json` with source/controller commits and APK checksums. These
+APKs **update the matching existing installation**, retaining its data; a
+normal-phone APK cannot update a dub installation. Android can reject a downgrade
+if the tester already has a higher versionCode; update the PR's version normally
+if needed. A production-signed PR test build is installable but still needs the
+relevant device/sensor testing. It is not published as a release or updater entry.
 
 Download the ZIP from the run's **Artifacts** section (7-day retention), or use
 `gh run download <run-id>`. Agents acting through the owner's GitHub credentials
@@ -113,9 +142,10 @@ It never overwrites existing release assets or silently retags an old version.
 
 Protect main and require owner review for build/workflow changes; CODEOWNERS
 identifies the trust-boundary files. An administrator who can edit main or the
-protected environment is trusted with signing. There are no PR/untrusted triggers
-on signing workflows, and environment policies reject branches/tags other than
-the main **branch**, even if a modified workflow tries to request signing secrets.
+protected environment is trusted with signing. Ordinary PR/fork CI has no signing
+secrets. Signing workflow/controller runs must come from the main **branch**;
+the explicit owner gate can additionally trust an exact PR snapshot. Requesting
+an APK does not grant approval authority. No signing job has `contents: write`.
 
 ## Private JNI inputs: inventory and provenance boundary
 

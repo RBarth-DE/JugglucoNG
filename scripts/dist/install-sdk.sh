@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "${1:-$(dirname "$0")/../..}"
 ndk=$(sed -n "s/^ *ndkver *= *'\(.*\)'.*/\1/p" Common/build.gradle)
 cmake=$(sed -n "s/^ *CMAKEVERSION *= *'\(.*\)'.*/\1/p" Common/build.gradle)
 sdk=$(sed -n 's/^ *TARGETSDK *= *\([0-9]*\).*/\1/p' Common/build.gradle)
