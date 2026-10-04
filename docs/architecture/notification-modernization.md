@@ -1,7 +1,7 @@
 # Notification modernization proposal
 
 Status: startup/timestamp fixes merged in [PR #485](https://github.com/ctqvva/JugglucoNG/pull/485).
-[PR #504](https://github.com/ctqvva/JugglucoNG/pull/504) now contains only the
+[PR #504](https://github.com/ctqvva/JugglucoNG/pull/504) merged only the
 bounded lifecycle fixes below. Rendering corrections and native text/vector
 presentation are separate follow-ups. No structural track changes are made.
 
@@ -29,12 +29,38 @@ choosing a fallback. No animation or native-motion claim is made here.
 
 ### Separate presentation corrections
 
-The sizing follow-up keeps the custom value hierarchy and font preferences. It
+The [sizing follow-up, PR #548](https://github.com/ctqvva/JugglucoNG/pull/548),
+keeps the custom value hierarchy and font preferences. It
 bounds transported bitmap glyphs with actual font metrics and applies FIT_XY to
 the compact chart's 48dp container, while keeping the expanded chart at FIT_CENTER.
 Its dedicated phone layouts leave independent alarm and Wear surfaces unchanged.
 These are rendering corrections, not a native-motion redesign. Native TextView
 and vector-arrow rendering is a further, separately reviewable change.
+
+### Native value/arrow follow-up
+
+The next presentation change keeps the same value hierarchy, peer tint, custom
+arrow shapes, chart preferences and DecoratedCustomViewStyle. Values are native
+TextViews using platform notification text appearance; arrows are resource vectors
+inside RotateDrawables, with independent head-count resources and rotation levels.
+The chart remains a bitmap. Unknown primary trend does not hide a known peer trend,
+and reapplication clears peer children before inserting the current peers.
+
+A standalone Pixel 8 Pro/API 37 probe renders compact/expanded native values,
+rotating/tinted vectors and double arrows; reopening retains its latest value.
+The XML bundled-font check used the app's actual IBM Plex file: local inflation
+loads it, but the shade's system/XML-font images are pixel-identical, including a
+cancelled and freshly reposted notification. Therefore ongoing phone values use
+the system font. Size/weight preferences remain; the ineffective phone font-family
+selector is removed. Stored family preferences and independent alarm/Wear rendering
+remain unchanged. This is a static native rendering improvement, not verified smooth
+motion. Light-shade, TalkBack traversal and large accessibility settings still need
+physical-device checks, along with full-app integration. The probe also compiles
+the actual production presenter and packages its XML/vector resources: compact,
+expanded, and a value/double-arrow update after reopening render in System UI.
+See the [reproducible probe and cropped device evidence](../../tools/notification-native-view-probe/README.md).
+Fourteen API 26/34 presenter host tests pass, as do phone/Wear debug/release arm64
+APK builds including R8. These checks do not establish full-app lifecycle behavior.
 
 Validation includes focused freshness, refresh coalescing, startup supersession,
 service ownership and publication-recovery tests on phone and Wear. Full-app

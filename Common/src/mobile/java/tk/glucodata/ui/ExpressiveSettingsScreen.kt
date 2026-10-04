@@ -1195,7 +1195,6 @@ fun NotificationSettingsSheet(
     
     // Font Settings
     var fontSize by remember { mutableFloatStateOf(prefs.getFloat("notification_font_size", 1.0f)) }
-    var fontType by remember { mutableIntStateOf(prefs.getInt("notification_font_family", 0)) } // 0=App, 1=System
     var fontWeight by remember { mutableIntStateOf(prefs.getInt("notification_font_weight", 400)) }
     
     // Arrow Settings
@@ -1214,7 +1213,6 @@ fun NotificationSettingsSheet(
         scope.launch {
             prefs.edit()
                  .putFloat("notification_font_size", fontSize)
-                 .putInt("notification_font_family", fontType)
                  .putInt("notification_font_weight", fontWeight)
                  .putBoolean("notification_show_arrow", showArrow)
                  .putFloat("notification_arrow_size", arrowSize)
@@ -1249,21 +1247,12 @@ fun NotificationSettingsSheet(
             // === FONT SECTION ===
             SectionLabel("Font", topPadding = 0.dp, modifier = Modifier.padding(horizontal = 24.dp))
             
-            // Font Family Toggle
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 24.dp)) {
-                FilterChip(
-                    selected = fontType == 0,
-                    onClick = { fontType = 0; save() },
-                    label = { Text(stringResource(R.string.font_app_plex)) }
-//                    leadingIcon = { if(fontType == 0) Icon(Icons.Filled.Check, null) }
-                )
-                FilterChip(
-                    selected = fontType == 1,
-                    onClick = { fontType = 1; save() },
-                    label = { Text(stringResource(R.string.font_system_google_sans)) }
-//                    leadingIcon = { if(fontType == 1) Icon(Icons.Filled.Check, null) }
-                )
-            }
+            Text(
+                stringResource(R.string.notification_system_font),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
             Spacer(Modifier.height(8.dp))
 
             // Font weight for the custom notification value rendering.
