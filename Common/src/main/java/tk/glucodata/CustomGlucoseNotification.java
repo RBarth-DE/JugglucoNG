@@ -19,7 +19,7 @@ final class CustomGlucoseNotification {
     static RemoteViews values(Context context, boolean expanded, CharSequence primary,
             int primaryColor, int secondaryColor, int tertiaryColor,
             java.util.List<NotificationChartDrawer.ValueItem> peers, float rate, int arrowColor,
-            boolean isMmol, float fontScale, int fontWeight, boolean largeArrow,
+            boolean isMmol, float fontScale, int fontWeight, boolean systemFont, boolean largeArrow,
             boolean showArrow, float arrowScale, CharSequence status, boolean night) {
         RemoteViews views = new RemoteViews(context.getPackageName(), expanded
                 ? R.layout.notification_phone_expanded : R.layout.notification_phone_compact);
@@ -36,8 +36,9 @@ final class CustomGlucoseNotification {
         }
         int weight = fontWeight == 300 || fontWeight == 500 ? fontWeight : 400;
         float safeArrowScale = Float.isFinite(arrowScale) && arrowScale >= 0.5f && arrowScale <= 1.5f ? arrowScale : 1f;
-        bindText(views, R.id.notification_glucose,
-                styledValue(primary, secondaryColor, tertiaryColor), primaryColor, textSize, textUnit, weight);
+        bindValue(context, views, R.id.notification_glucose, R.id.notification_glucose_image,
+                styledValue(primary, secondaryColor, tertiaryColor), primaryColor, textSize, textUnit,
+                textPixels, weight, systemFont);
         bindArrow(context, views, R.id.notification_arrow, rate, arrowColor,
                 textPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
         // Clear children before replacing peers so reapplication cannot retain an old sensor.
@@ -48,8 +49,9 @@ final class CustomGlucoseNotification {
                     peer.color, SensorVisuals.PEER_TEXT_BLEND);
             RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.notification_phone_peer);
             float peerPixels = textPixels * 0.78f;
-            bindText(item, R.id.notification_peer_value,
-                    styledValue(peer.text, secondaryColor, tertiaryColor), color, textSize * 0.78f, textUnit, weight);
+            bindValue(context, item, R.id.notification_peer_value, R.id.notification_peer_image,
+                    styledValue(peer.text, secondaryColor, tertiaryColor), color, textSize * 0.78f, textUnit,
+                    peerPixels, weight, systemFont);
             bindArrow(context, item, R.id.notification_peer_arrow, peer.rate, color,
                     peerPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
             views.addView(R.id.notification_peers, item);
@@ -62,17 +64,37 @@ final class CustomGlucoseNotification {
         return views;
     }
 
-    private static void bindText(RemoteViews views, int id, CharSequence text, int color,
-            float size, int unit, int weight) {
-        SpannableStringBuilder styled = new SpannableStringBuilder(text);
-        if (weight != 400 && styled.length() > 0) {
-            styled.setSpan(new TypefaceSpan(weight == 300 ? "sans-serif-light" : "sans-serif-medium"),
+    private static void bindValue(Context context, RemoteViews views, int textId, int imageId,
+            CharSequence text, int color, float size, int unit, float pixels, int weight, boolean systemFont) {
+        // Named system fonts cross the process boundary. Bundled Typeface objects
+        // do not; paint IBM Plex in-app rather than silently substituting Roboto.
+        // Light weight also uses the painter because RemoteViews cannot set a
+        // numeric TextView font weight and a sans-serif-light span loses the OEM family.
+        boolean nativeText = systemFont && weight != 300;
+        views.setViewVisibility(textId, nativeText ? View.VISIBLE : View.GONE);
+        views.setViewVisibility(imageId, nativeText ? View.GONE : View.VISIBLE);
+        if (nativeText) {
+            SpannableStringBuilder styled = new SpannableStringBuilder(text);
+            if (styled.length() > 0) styled.setSpan(new TypefaceSpan(systemFamily(context, weight)),
                     0, styled.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            views.setTextViewText(textId, styled);
+            views.setTextViewTextSize(textId, unit, size);
+            views.setTextColor(textId, color);
+            views.setImageViewBitmap(imageId, null);
+        } else {
+            Bitmap bitmap = NotificationValueBitmap.draw(context, text, color, pixels, weight, systemFont);
+            // Bound transported raster height even when System UI resets bitmap density.
+            views.setInt(imageId, "setMaxHeight", (bitmap.getHeight() + 1) / 2);
+            views.setImageViewBitmap(imageId, bitmap);
+            views.setContentDescription(imageId, text);
         }
-        views.setTextViewText(id, styled);
-        views.setTextViewTextSize(id, unit, size);
-        // Preserve resolved semantic/user colors; XML supplies the platform font/style.
-        views.setTextColor(id, color);
+    }
+
+    static String systemFamily(Context context, int weight) {
+        String resource = weight == 500 ? "config_headlineFontFamilyMedium" : "config_headlineFontFamily";
+        int id = context.getResources().getIdentifier(resource, "string", "android");
+        if (id != 0) return context.getResources().getString(id);
+        return weight == 500 ? "sans-serif-medium" : "sans-serif";
     }
 
     private static CharSequence styledValue(CharSequence value, int secondary, int tertiary) {

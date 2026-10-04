@@ -25,9 +25,9 @@ class CustomGlucoseNotificationTests {
     private val app: Application = ApplicationProvider.getApplicationContext()
     private fun values(expanded: Boolean = true, rate: Float = 0f,
         peers: List<NotificationChartDrawer.ValueItem> = listOf(NotificationChartDrawer.ValueItem("5,5", 0xff81a9f6.toInt(), 0f)),
-        scale: Float = 1f, enabled: Boolean = true) =
+        scale: Float = 1f, enabled: Boolean = true, systemFont: Boolean = true, weight: Int = 400) =
         CustomGlucoseNotification.values(app, expanded, "5,7", 0xffeeeeee.toInt(), 0xffcccccc.toInt(),
-            0xffaaaaaa.toInt(), peers, rate, 0xffff0000.toInt(), true, scale, 400, false, enabled, 1f, "", true)
+            0xffaaaaaa.toInt(), peers, rate, 0xffff0000.toInt(), true, scale, weight, systemFont, false, enabled, 1f, "", true)
 
     @Test fun nativeReadoutSurvivesParcelAndRestrictedHostWithoutBitmapValues() {
         val parcel = Parcel.obtain()
@@ -103,6 +103,59 @@ class CustomGlucoseNotificationTests {
         compact.measure(View.MeasureSpec.makeMeasureSpec((300*density).toInt(), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         assertTrue(compact.measuredHeight <= 48*density+1)
+    }
+
+    @Test fun ibmPlexHasAccessibleBoundedPrimaryAndPeerImagesAndKeepsVectorArrows() {
+        val restricted = object : android.content.ContextWrapper(app) { override fun isRestricted() = true }
+        val views = values(expanded = false, scale = 1.5f, systemFont = false)
+        val parcel = Parcel.obtain()
+        try {
+            views.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            val root = android.widget.RemoteViews.CREATOR.createFromParcel(parcel).apply(restricted, null)
+            assertEquals(View.GONE, root.findViewById<TextView>(R.id.notification_glucose).visibility)
+            assertEquals(View.GONE, root.findViewById<TextView>(R.id.notification_peer_value).visibility)
+            for ((id, description) in listOf(R.id.notification_glucose_image to "5,7", R.id.notification_peer_image to "5,5")) {
+                val image = root.findViewById<ImageView>(id)
+                assertEquals(View.VISIBLE, image.visibility)
+                assertEquals(description, image.contentDescription.toString())
+                val bitmap = (image.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                assertTrue(bitmap.width > 0)
+                assertEquals((bitmap.height + 1) / 2, image.maxHeight)
+            }
+            assertTrue(root.findViewById<ImageView>(R.id.notification_arrow).drawable is RotateDrawable)
+            val density = app.resources.displayMetrics.density
+            root.measure(View.MeasureSpec.makeMeasureSpec((300*density).toInt(), View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            assertTrue(root.measuredHeight <= 48*density+1)
+        } finally { parcel.recycle() }
+    }
+
+    @Test fun familySwitchReappliesBothDirectionsAndClearsHiddenBitmap() {
+        val root = values().apply(app, null)
+        values(systemFont = false).reapply(app, root)
+        assertEquals(View.VISIBLE, root.findViewById<ImageView>(R.id.notification_glucose_image).visibility)
+        assertEquals(View.GONE, root.findViewById<TextView>(R.id.notification_glucose).visibility)
+        values().reapply(app, root)
+        assertEquals(View.VISIBLE, root.findViewById<TextView>(R.id.notification_glucose).visibility)
+        assertEquals(View.GONE, root.findViewById<ImageView>(R.id.notification_glucose_image).visibility)
+        assertNull((root.findViewById<ImageView>(R.id.notification_glucose_image).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap)
+        assertEquals(View.VISIBLE, root.findViewById<TextView>(R.id.notification_peer_value).visibility)
+        assertNull((root.findViewById<ImageView>(R.id.notification_peer_image).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap)
+    }
+
+    @Test fun systemTextUsesTheConfiguredHeadlineFamilyRatherThanGenericSans() {
+        for (weight in listOf(400, 500)) {
+            val text = values(weight = weight).apply(app, null).findViewById<TextView>(R.id.notification_glucose).text as android.text.Spanned
+            val spans = text.getSpans(0, text.length, android.text.style.TypefaceSpan::class.java)
+            assertEquals(1, spans.size)
+            val resource = if (weight == 500) "config_headlineFontFamilyMedium" else "config_headlineFontFamily"
+            val id = app.resources.getIdentifier(resource, "string", "android")
+            val expected = if (id != 0) app.resources.getString(id) else if (weight == 500) "sans-serif-medium" else "sans-serif"
+            assertEquals(expected, spans[0].family)
+        }
+        val light = values(weight = 300).apply(app, null)
+        assertEquals(View.VISIBLE, light.findViewById<ImageView>(R.id.notification_glucose_image).visibility)
     }
 
     @Test fun notificationKeepsCustomContentAndActualTimestampWithUnitlessFallback() {

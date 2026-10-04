@@ -4166,11 +4166,11 @@ public class Notify {
         if (customPhone) {
             remoteViews = CustomGlucoseNotification.values(Applic.app, false, valueText, primaryDisplayColor,
                     secondaryDisplayColor, tertiaryDisplayColor, peerValueItems, rate, arrowColor,
-                    isMmol, fontSize, fontWeight, prefs.getBoolean("notification_large_trend_arrow", false),
+                    isMmol, fontSize, fontWeight, useSystemFont, prefs.getBoolean("notification_large_trend_arrow", false),
                     showArrow, arrowSize, newStatusText, shadeNight);
             remoteViewsExpanded = CustomGlucoseNotification.values(Applic.app, true, valueText, primaryDisplayColor,
                     secondaryDisplayColor, tertiaryDisplayColor, peerValueItems, rate, arrowColor,
-                    isMmol, fontSize, fontWeight, prefs.getBoolean("notification_large_trend_arrow", false),
+                    isMmol, fontSize, fontWeight, useSystemFont, prefs.getBoolean("notification_large_trend_arrow", false),
                     showArrow, arrowSize, newStatusText, shadeNight);
         } else {
             remoteViews = new RemoteViews(Applic.app.getPackageName(), R.layout.notification_material);

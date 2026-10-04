@@ -6,7 +6,7 @@ replacement. Uses `DecoratedCustomViewStyle`, platform notification title text
 appearance, real primary/peer TextViews, resource vectors inside RotateDrawables,
 and a bitmap chart. The default and double-head geometry follows the app's arrow.
 
-## Pixel result, 2026-10-04
+## Initial XML-font probe, 2026-10-04
 
 Pixel 8 Pro, Android 17/API 37, build `CP41.260831.007`, target SDK 37:
 
@@ -88,6 +88,46 @@ adb -s "$probe_serial" logcat -d -v threadtime NativeViewProbe:I NotifContentInf
 adb -s "$probe_serial" uninstall tk.glucodata.nativeviewprobe
 ```
 
-The preview was removed at the end of the check. System font is the verified
-fallback for the production native-value implementation; keeping a font setting
-that silently has no effect would misrepresent the supported behavior.
+The preview was removed at the end of each check.
+
+## Font-selection repair, 2026-10-05
+
+The initial recipe incorrectly treated the generic platform notification style
+as the configured system font and removed IBM Plex support. The corrected
+production presenter accepts the existing family preference (unset means IBM).
+IBM values are rendered in-app using the bundled font, including compound spans,
+with actual layout metrics and bounded 2x-density transport. Arrows remain vectors.
+System regular/medium values stay TextViews with named configured headline-family
+spans; light weight uses the app-side painter to preserve the configured family
+while applying numeric weight.
+
+On the same Pixel, `cmd overlay lookup android android:string/config_headlineFontFamily`
+returns `google-sans`, medium returns `google-sans-medium`, and body returns
+`google-sans-text`. Generic `sans-serif` is a different family. Do not describe
+unmodified notification Title text appearance as Google Sans.
+
+The actual production presenter/resources were checked in the shade with:
+
+```sh
+adb -s "$probe_serial" shell am start -S -W -n tk.glucodata.nativeviewprobe/.ProbeActivity --ez production true --ez ibm true --ei step 0
+adb -s "$probe_serial" shell am broadcast -n tk.glucodata.nativeviewprobe/.ProbeReceiver --ez production true --ez ibm false --ei step 0
+adb -s "$probe_serial" shell am broadcast -n tk.glucodata.nativeviewprobe/.ProbeReceiver --ez production true --ez ibm true --ei step 0
+```
+
+Compact and expanded IBM content rendered successfully. In the expanded value
+region (730 x 140 pixels), IBM versus System changes 7,530 pixels; switching
+System back to IBM restores the original crop exactly (zero changed pixels).
+This uses the same notification ID, exercising System UI reapplication. These
+are synthetic inputs; the installed CGM app was unchanged. The preview was removed.
+
+IBM Plex:
+
+![IBM Plex](evidence/font-fixed-ibm.png)
+
+Configured System (Google Sans on this Pixel):
+
+![Google Sans](evidence/font-fixed-google-sans.png)
+
+Switched back to IBM Plex:
+
+![IBM Plex reapplied](evidence/font-fixed-ibm-reapplied.png)
