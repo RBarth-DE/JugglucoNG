@@ -126,5 +126,37 @@ class ApkVerification(unittest.TestCase):
                 dist.main()
 
 
+# Import release helper through its normal sibling-module lookup.
+import sys
+sys.path.insert(0, str(BASE))
+release = module('release-preflight')
+
+
+class ReleasePreflight(unittest.TestCase):
+    def run_preflight(self, tag='1.2.3-Alpha', refs=None, releases=None, previous_code=1022):
+        from io import BytesIO
+        with patch.dict('os.environ', {'TAG': tag, 'GITHUB_REPOSITORY': 'ctqvva/JugglucoNG'}), \
+             patch.object(release, 'version', return_value=('1.2.3-Alpha', 1023)), \
+             patch.object(release.subprocess, 'check_output', side_effect=[json.dumps([refs or []]), json.dumps([releases or []])]), \
+             patch.object(release.urllib.request, 'urlopen', return_value=BytesIO(json.dumps({'versionCode': previous_code}).encode())):
+            release.main()
+
+    def test_existing_tag_and_draft_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'Tag already exists'):
+            self.run_preflight(refs=[{'ref': 'refs/tags/1.2.3-Alpha'}])
+        with self.assertRaisesRegex(ValueError, 'including draft'):
+            self.run_preflight(releases=[{'tag_name': '1.2.3-Alpha', 'draft': True}])
+
+    def test_version_mismatch_and_regression_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'exactly equal'):
+            self.run_preflight(tag='v1.2.3-Alpha')
+        for previous in [1023, 1024]:
+            with self.assertRaisesRegex(ValueError, 'exceed every'):
+                self.run_preflight(releases=[{'tag_name': '1.2.2-Alpha', 'draft': False, 'assets': [{'name': 'update-manifest.json', 'browser_download_url': 'https://example.invalid/manifest'}]}], previous_code=previous)
+
+    def test_new_increasing_version_accepted(self):
+        self.run_preflight(releases=[{'tag_name': '1.2.2-Alpha', 'draft': False, 'assets': [{'name': 'update-manifest.json', 'browser_download_url': 'https://example.invalid/manifest'}]}])
+
+
 if __name__ == '__main__':
     unittest.main()

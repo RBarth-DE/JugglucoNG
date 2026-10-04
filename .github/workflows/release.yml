@@ -73,7 +73,9 @@ jobs:
           flags=(--latest)
           if [ "$PRERELEASE" = true ]; then flags=(--prerelease --latest=false); fi
           # Draft first: partial uploads must never be visible to the updater.
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes --draft
+          # Atomically reserve the exact SHA; fail if anyone created the tag meanwhile.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA"
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --draft
           gh release upload "$TAG" build/dist/all/*.apk build/dist/all/update-manifest.json
           gh release edit "$TAG" --draft=false "${flags[@]}"
           echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
