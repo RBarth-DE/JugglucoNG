@@ -2,60 +2,122 @@ package tk.glucodata;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.TypefaceSpan;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.RemoteViews;
 
-/** Phone content preserving the app's unitless value hierarchy and custom arrows. */
+/** Native phone readouts inside the established custom notification hierarchy. */
 final class CustomGlucoseNotification {
     private CustomGlucoseNotification() { }
 
     static RemoteViews values(Context context, boolean expanded, CharSequence primary,
             int primaryColor, int secondaryColor, int tertiaryColor,
             java.util.List<NotificationChartDrawer.ValueItem> peers, float rate, int arrowColor,
-            boolean isMmol, float fontScale, int fontWeight, boolean systemFont,
+            boolean isMmol, float fontScale, int fontWeight, boolean largeArrow,
             boolean showArrow, float arrowScale, CharSequence status, boolean night) {
         RemoteViews views = new RemoteViews(context.getPackageName(), expanded
                 ? R.layout.notification_phone_expanded : R.layout.notification_phone_compact);
         android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         float safeScale = Float.isFinite(fontScale) && fontScale >= 0.6f && fontScale <= 1.5f ? fontScale : 1f;
-        float textPixels = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
-                (expanded ? 28f : 24f) * safeScale, metrics);
-        if (!expanded) textPixels = Math.min(textPixels, 32f * metrics.density);
+        float textSize = (expanded ? 28f : 24f) * safeScale;
+        int textUnit = TypedValue.COMPLEX_UNIT_SP;
+        float textPixels = TypedValue.applyDimension(textUnit, textSize, metrics);
+        if (!expanded && textPixels > 32f * metrics.density) {
+            // Compact content has a fixed host budget; expanded text retains SP
+            // so the host can apply accessibility scaling without a new reading.
+            textUnit = TypedValue.COMPLEX_UNIT_PX;
+            textSize = textPixels = 32f * metrics.density;
+        }
         int weight = fontWeight == 300 || fontWeight == 500 ? fontWeight : 400;
         float safeArrowScale = Float.isFinite(arrowScale) && arrowScale >= 0.5f && arrowScale <= 1.5f ? arrowScale : 1f;
-        Bitmap value = NotificationChartDrawer.drawMultiGlucoseText(context,
-                primary == null ? "" : primary.toString(), primaryColor, secondaryColor, tertiaryColor,
-                peers, textPixels / (22f * metrics.density), weight, systemFont,
-                rate, isMmol, safeArrowScale, showArrow, arrowColor);
-        // The painter renders at twice display density. Bound the view from those
-        // actual font metrics too: System UI's bitmap transport can reset density.
-        value.setDensity(Math.round(metrics.densityDpi * 2f));
-        views.setInt(R.id.notification_glucose_image, "setMaxHeight", (value.getHeight() + 1) / 2);
-        views.setImageViewBitmap(R.id.notification_glucose_image, value);
-        views.setContentDescription(R.id.notification_glucose_image, valueDescription(primary, peers));
-        // Keep the primary arrow in the strip too, so narrow hosts scale it with the value.
-        views.setViewVisibility(R.id.notification_arrow, View.GONE);
+        bindText(views, R.id.notification_glucose,
+                styledValue(primary, secondaryColor, tertiaryColor), primaryColor, textSize, textUnit, weight);
+        bindArrow(context, views, R.id.notification_arrow, rate, arrowColor,
+                textPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
+        // Clear children before replacing peers so reapplication cannot retain an old sensor.
+        views.removeAllViews(R.id.notification_peers);
+        if (peers != null) for (NotificationChartDrawer.ValueItem peer : peers) {
+            if (peer == null || peer.text.isEmpty()) continue;
+            int color = SensorVisuals.blendArgb(night ? Color.WHITE : Color.BLACK,
+                    peer.color, SensorVisuals.PEER_TEXT_BLEND);
+            RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.notification_phone_peer);
+            float peerPixels = textPixels * 0.78f;
+            bindText(item, R.id.notification_peer_value,
+                    styledValue(peer.text, secondaryColor, tertiaryColor), color, textSize * 0.78f, textUnit, weight);
+            bindArrow(context, item, R.id.notification_peer_arrow, peer.rate, color,
+                    peerPixels * 0.8f * safeArrowScale, showArrow, largeArrow);
+            views.addView(R.id.notification_peers, item);
+        }
         boolean hasStatus = status != null && status.length() > 0;
         if (!expanded && textPixels + TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, metrics)
                 > 40f * metrics.density) hasStatus = false;
         views.setViewVisibility(R.id.notification_status, hasStatus ? View.VISIBLE : View.GONE);
-        if (hasStatus) {
-            int familyId = context.getResources().getIdentifier("config_bodyFontFamily", "string", "android");
-            android.text.SpannableStringBuilder styled = new android.text.SpannableStringBuilder(status);
-            if (familyId != 0) styled.setSpan(new android.text.style.TypefaceSpan(context.getResources().getString(familyId)),
-                    0, styled.length(), android.text.Spanned.SPAN_INCLUSIVE_INCLUSIVE);
-            views.setTextViewText(R.id.notification_status, styled);
-            views.setTextColor(R.id.notification_status, night ? 0xB3FFFFFF : 0x8A000000);
-        }
+        if (hasStatus) views.setTextViewText(R.id.notification_status, status);
         return views;
+    }
+
+    private static void bindText(RemoteViews views, int id, CharSequence text, int color,
+            float size, int unit, int weight) {
+        SpannableStringBuilder styled = new SpannableStringBuilder(text);
+        if (weight != 400 && styled.length() > 0) {
+            styled.setSpan(new TypefaceSpan(weight == 300 ? "sans-serif-light" : "sans-serif-medium"),
+                    0, styled.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        views.setTextViewText(id, styled);
+        views.setTextViewTextSize(id, unit, size);
+        // Preserve resolved semantic/user colors; XML supplies the platform font/style.
+        views.setTextColor(id, color);
+    }
+
+    private static CharSequence styledValue(CharSequence value, int secondary, int tertiary) {
+        SpannableStringBuilder text = new SpannableStringBuilder(value == null ? "" : value);
+        String plain = text.toString();
+        int second = plain.indexOf(" · ");
+        if (second < 0) return text;
+        int third = plain.indexOf(" · ", second + 3);
+        int secondEnd = third < 0 ? text.length() : third;
+        text.setSpan(new RelativeSizeSpan(0.7f), second, secondEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(secondary), second, secondEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (third >= 0) {
+            text.setSpan(new RelativeSizeSpan(0.6f), third, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            text.setSpan(new ForegroundColorSpan(tertiary), third, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return text;
+    }
+
+    private static void bindArrow(Context context, RemoteViews views, int id, float rate, int color,
+            float pixels, boolean enabled, boolean large) {
+        boolean visible = enabled && Float.isFinite(rate);
+        views.setViewVisibility(id, visible ? View.VISIBLE : View.GONE);
+        if (!visible) return;
+        boolean doubled = Math.abs(rate) > 2f;
+        int drawable = large ? (doubled ? R.drawable.notification_trend_long_double : R.drawable.notification_trend_long_single)
+                : (doubled ? R.drawable.notification_trend_double : R.drawable.notification_trend_single);
+        views.setImageViewResource(id, drawable);
+        float angle = TrendArrowAngle.rotationDegrees(rate);
+        // Level controls rotation; select head-count resources independently of that level.
+        views.setInt(id, "setImageLevel", Math.round((angle + 90f) * 10000f / 180f));
+        views.setInt(id, "setColorFilter", color);
+        int size = Math.max(1, Math.round(pixels));
+        views.setInt(id, "setMaxWidth", size);
+        views.setInt(id, "setMaxHeight", size);
+        int description = angle == 0f ? R.string.notification_trend_steady
+                : rate > 0 ? (doubled ? R.string.notification_trend_rising_fast : R.string.notification_trend_rising)
+                : (doubled ? R.string.notification_trend_falling_fast : R.string.notification_trend_falling);
+        views.setContentDescription(id, context.getString(description));
     }
 
     private static String valueDescription(CharSequence primary,
             java.util.List<NotificationChartDrawer.ValueItem> peers) {
         StringBuilder text = new StringBuilder(primary == null ? "" : primary.toString());
         if (peers != null) for (NotificationChartDrawer.ValueItem peer : peers) {
-            if (peer != null && peer.text != null && !peer.text.isEmpty()) text.append(" · ").append(peer.text);
+            if (peer != null && !peer.text.isEmpty()) text.append(" · ").append(peer.text);
         }
         return text.toString();
     }
@@ -63,8 +125,7 @@ final class CustomGlucoseNotification {
     static void apply(android.app.Notification.Builder builder, CharSequence primary,
             java.util.List<NotificationChartDrawer.ValueItem> peers, CharSequence status,
             RemoteViews compact, RemoteViews expanded) {
-        builder.setContentTitle(valueDescription(primary, peers))
-                .setContentText(status == null ? "" : status)
+        builder.setContentTitle(valueDescription(primary, peers)).setContentText(status == null ? "" : status)
                 .setStyle(new android.app.Notification.DecoratedCustomViewStyle())
                 .setCustomContentView(compact).setCustomBigContentView(expanded);
     }
