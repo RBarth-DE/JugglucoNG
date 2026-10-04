@@ -6,6 +6,7 @@ import subprocess
 import sys
 import urllib.request
 from dist import version
+from nightly import is_nightly
 
 
 def api(path):
@@ -27,6 +28,10 @@ def main():
         if release['tag_name'] == tag:
             raise ValueError('Release already exists, including draft; resolve it before retrying')
         if release['draft']:
+            continue
+        # Nightlies reuse the committed app version; they do not reserve that
+        # versionCode or block promotion of the same code to a regular release.
+        if is_nightly(release):
             continue
         asset = next((a for a in release['assets'] if a['name'] == 'update-manifest.json'), None)
         if asset:

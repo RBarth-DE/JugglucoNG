@@ -39,6 +39,8 @@ The environments are configured in the repository:
 - `production-signing`: **main branch only**, four signing secrets, licensing flag.
 - `production-pr-review`: **main controller only**, approval by `ctqvva`, admin
   bypass disabled, **no secrets**. Approval covers one immutable PR source snapshot.
+- `nightly-publication`: **main branch only**, no reviewer and no secrets;
+  automatically publishes experimental nightlies without granting signing access.
 - `release-publication`: **main branch only**, approval by `ctqvva`, admin bypass
   disabled. Self approval is allowed so the sole owner can request and approve.
 
@@ -59,7 +61,7 @@ permissions, removes it on exit, and passes the existing Gradle properties via
 step-local environment variables. No signing material reaches the publication
 job or artifacts.
 
-Both callers of `signed-build.yml` must retain `secrets: inherit`: GitHub currently
+All callers of `signed-build.yml` must retain `secrets: inherit`: GitHub currently
 resolves the reusable job's environment secrets as empty without explicit secret
 forwarding. Keep signing values in `production-signing`; its main-only policy and
 the reusable job's trusted-main guard still apply. Publication remains a separate
@@ -117,6 +119,55 @@ Download the ZIP from the run's **Artifacts** section (7-day retention), or use
 `gh run download <run-id>`. Agents acting through the owner's GitHub credentials
 can use the CLI command. Workflow dispatch requires repository write access,
 which is why the comment command exists for JetFoxy. No PAT or GitHub App is needed.
+
+## Automated nightlies
+
+**Nightly prerelease** runs daily at **00:23 UTC / 05:23 Asia/Yekaterinburg**.
+GitHub's scheduler can run late. Only the captured official main SHA is eligible;
+its push CI must have passed. If that SHA matches the last successfully published
+nightly, the expensive build and signing jobs are skipped. A queued older snapshot
+is also skipped; divergent main history fails for inspection. All commits merged
+to main count as changes, including build/documentation changes. A failed build
+or unpublished draft never advances the successful baseline.
+
+The workflow automatically builds `build-dist.sh all`, verifies the same four
+production-signed APKs plus `update-manifest.json`, and posts a prerelease titled
+**Nightly YYYY-MM-DD**. Dates are UTC; tags are
+`nightly-YYYY-MM-DD-<12-character-main-SHA>` so different snapshots on one date
+do not overwrite each other. Notes start with an experimental/testing warning,
+identify the exact source and link changes since the previous nightly. Internal
+APK names/version codes remain canonical; successive nightlies can show the same
+app version. They update the matching existing app, so back up settings/data
+before testing. They do not become GitHub's latest release or enter the normal
+in-app updater, which excludes prereleases.
+
+Signing uses the existing main-only `production-signing` environment. The separate
+`nightly-publication` job has `contents: write` and no signing material. Unlike a
+regular release, publication has no approval gate: requesting unattended nightlies
+authorizes publication of these trusted main snapshots. PR signing still requires
+its separate owner gate. No new secrets are needed.
+
+The **seven most recent published nightlies** are retained. Cleanup deletes only
+this automation's marked, dated prereleases and their tags; it preserves regular
+releases, unrelated prereleases, drafts, and any pinned vendor baseline. Retention
+also runs on skipped-build days so failed cleanup can recover. This keeps normal
+releases visible in the existing updater's 15-release window. Regular release
+preflight ignores only these identified nightlies, allowing the same committed
+version/code to be promoted after testing; normal version-increase rules still
+apply against regular releases.
+
+To run the same change/CI checks now rather than wait for the schedule:
+
+```sh
+gh workflow run nightly.yml --ref main
+```
+
+There is no force/rebuild or arbitrary-ref input. If CI is pending, wait for it
+and retry. Failed uploads leave a hidden draft/tag, as with regular releases:
+inspect/remove that failed draft/tag before retrying the same snapshot on the
+same UTC date; the next day's dated tag can retry without overwriting it. Vendor
+bootstrap state blocks remote nightlies until the documented local release and
+new-baseline procedure below is complete.
 
 ## Publish a release
 
