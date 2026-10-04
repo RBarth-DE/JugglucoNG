@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Distribution contract shared by local builds, Actions and release validation."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -51,7 +52,24 @@ def abis():
 
 
 def inventory():
-    return json.loads((ROOT / 'scripts/dist/build-inputs.json').read_text())
+    data = json.loads((ROOT / 'scripts/dist/build-inputs.json').read_text())
+    if (data['schema'] != 1 or not isinstance(data['source']['url'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', data['source']['sha256'])
+            or type(data.get('bootstrapRequired', False)) is not bool):
+        raise ValueError('Invalid vendor inventory metadata')
+    paths = set()
+    for spec in data['files']:
+        input_entry(spec['path'])
+        if (spec['path'] in paths or type(spec['size']) is not int or spec['size'] <= 0
+                or not re.fullmatch(r'[0-9a-f]{64}', spec['sha256'])):
+            raise ValueError('Invalid or duplicate vendor input specification')
+        paths.add(spec['path'])
+    removed = data.get('removedFiles', [])
+    if len(set(removed)) != len(removed) or paths.intersection(removed):
+        raise ValueError('Invalid removed vendor inputs')
+    for path in removed:
+        input_entry(path)
+    return data
 
 
 def inputs_check():
@@ -70,8 +88,17 @@ def inputs_check():
     print(f'Verified {len(expected)} private JNI inputs', file=sys.stderr)
 
 
-def restore(apk=None):
-    data = inventory()
+def input_entry(path):
+    path = Path(path)
+    if (path.parts[:4] != ('Common', 'src', 'main', 'jniLibs') or len(path.parts) != 6
+            or path.parts[4] not in ARM_ABIS or not re.fullmatch(r'lib[A-Za-z0-9_+.-]+\.so', path.parts[5])
+            or path.name in {'libg.so', 'libnative.so'}):
+        raise ValueError(f'Invalid vendor input path: {path}')
+    return 'lib/' + '/'.join(path.parts[4:])
+
+
+@contextmanager
+def source_archive(data, apk=None):
     with tempfile.TemporaryDirectory(prefix='juggluco-inputs-') as tmp:
         archive = Path(apk) if apk else Path(tmp) / 'source.apk'
         if not apk:
@@ -80,26 +107,45 @@ def restore(apk=None):
                 shutil.copyfileobj(src, out)
         if digest(archive.read_bytes()) != data['source']['sha256']:
             raise ValueError('Build input source APK checksum mismatch')
-        # Explicit allowlist: never extract libg.so or libraries built from dependencies.
         with zipfile.ZipFile(archive) as z:
-            payloads = []
-            for spec in data['files']:
-                path = Path(spec['path'])
-                if (path.parts[:4] != ('Common', 'src', 'main', 'jniLibs') or len(path.parts) != 6
-                        or path.parts[4] not in ARM_ABIS or not re.fullmatch(r'lib[A-Za-z0-9_+.-]+\.so', path.parts[5])):
-                    raise ValueError('Invalid inventory path')
-                content = z.read('lib/' + '/'.join(path.parts[4:]))
-                if len(content) != spec['size'] or digest(content) != spec['sha256']:
-                    raise ValueError(f'Input checksum mismatch: {path}')
-                dest = ROOT / path
-                if not dest.resolve().is_relative_to(ROOT.resolve()):
-                    raise ValueError(f'Input path escapes checkout: {path}')
-                if dest.exists() and digest(dest.read_bytes()) != spec['sha256']:
-                    raise ValueError(f'Refusing to overwrite different local input: {path}')
-                payloads.append((dest, content))
-            for dest, content in payloads:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(content)
+            yield z
+
+
+def unavailable_inputs(data, archive):
+    missing = []
+    for spec in data['files']:
+        entry = input_entry(spec['path'])
+        try:
+            content = archive.read(entry)
+        except KeyError:
+            missing.append(spec['path'])
+            continue
+        if len(content) != spec['size'] or digest(content) != spec['sha256']:
+            missing.append(spec['path'])
+    return missing
+
+
+def restore(apk=None):
+    data = inventory()
+    if data.get('bootstrapRequired', False):
+        raise ValueError('Vendor inputs await their first published baseline. Build locally with '
+                         'scripts/build-dist.sh all, then use scripts/release-local.sh; '
+                         'run scripts/update-build-inputs.sh --baseline <published-tag> afterwards.')
+    with source_archive(data, apk) as z:
+        payloads = []
+        for spec in data['files']:
+            content = z.read(input_entry(spec['path']))
+            if len(content) != spec['size'] or digest(content) != spec['sha256']:
+                raise ValueError(f"Input checksum mismatch: {spec['path']}")
+            dest = ROOT / spec['path']
+            if not dest.resolve().is_relative_to(ROOT.resolve()):
+                raise ValueError(f"Input path escapes checkout: {spec['path']}")
+            if dest.exists() and digest(dest.read_bytes()) != spec['sha256']:
+                raise ValueError(f"Refusing to overwrite different local input: {spec['path']}")
+            payloads.append((dest, content))
+        for dest, content in payloads:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
     inputs_check()
 
 
@@ -147,6 +193,9 @@ def verify_apk(apk, flavor, build_type):
             path = spec['path'].split('/jniLibs/')[1]
             if path.split('/')[0] in abis() and digest(z.read('lib/' + path)) != spec['sha256']:
                 raise ValueError(f'APK JNI checksum mismatch: {apk.name}: {path}')
+        for path in inventory().get('removedFiles', []):
+            if input_entry(path) in z.namelist():
+                raise ValueError(f'Removed vendor input still packaged: {apk.name}: {path}')
     print(f'Verified production signature, version and JNI payload: {apk.name}', file=sys.stderr)
 
 

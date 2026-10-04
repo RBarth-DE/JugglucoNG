@@ -113,7 +113,7 @@ the main **branch**, even if a modified workflow tries to request signing secret
 
 ## Private JNI inputs: inventory and provenance boundary
 
-`scripts/dist/build-inputs.json` inventories **32 files / 43,099,388 bytes**:
+The initial `scripts/dist/build-inputs.json` inventories **32 files / 43,099,388 bytes**:
 17 `armeabi-v7a` and 15 `arm64-v8a` libraries under `Common/src/main/jniLibs`.
 These are the exact ignored inputs consumed by `build-dist.sh all` to reproduce
 its existing JNI payload, including legacy libraries that may no longer have an
@@ -129,8 +129,8 @@ An existing different local file is never overwritten.
 
 No private assets repo, download token, secret archive or new proprietary upload
 is needed. Keep that historical release asset available: a missing or changed
-source fails closed. Update the inventory in an owner-reviewed PR when legitimate
-input versions change; do not silently follow the latest release. File hashes
+source fails closed. Use the lifecycle commands below when legitimate input versions change; do not
+edit hashes by hand or silently follow the latest release. File hashes
 are public metadata, not binary contents or credentials.
 
 The ARM inventory contains `libinit`, `libcalibrat2`, `libcalibrate` (v7a only),
@@ -154,3 +154,63 @@ inputs**, and are intentionally never restored. Canonical distributions define
 owner's checkout; users can configure their TURN server in app settings. Ordinary
 local Gradle development builds retain the optional overrides. No contents or
 credential hashes from these headers are recorded.
+
+
+## Update vendor library → test → release → new baseline
+
+Keep maintaining the actual binaries in the ignored
+`Common/src/main/jniLibs/{arm64-v8a,armeabi-v7a}/` directories. Restore the full
+current set before editing it; a clean/partial checkout is not an inventory source.
+Review redistribution rights and provenance for every added/replaced library.
+
+1. Add/replace/delete the desired `.so` files, then run:
+   ```sh
+   scripts/update-build-inputs.sh
+   scripts/build-dist.sh all --no-daemon --no-configuration-cache
+   ```
+   The updater scans both ARM directories and computes all names, sizes and hashes.
+   It checks the pinned old APK and writes **only public metadata**. For offline
+   regeneration use `--apk <the-existing-pinned-source.apk>`. No binary is copied
+   into Git. Inventoried libraries are automatically exempted from Gradle stripping,
+   so a new filename retains its exact bytes. Run the relevant sensor/runtime tests
+   as well: APK/hash checks do not prove that a changed vendor algorithm works.
+2. Commit the generated inventory and any necessary code/version changes in a PR;
+   bump the app version/code for the upcoming release. Keep the `.so` files ignored.
+   Review the metadata diff, including removals. Deletions get automatic
+   `removedFiles` entries; builds reject APKs that still contain those retired files.
+3. If the pinned APK supplies every remaining file (including ordinary removals),
+   Actions still works: merge and use the normal Release workflow. If a new hash
+   is unavailable, the updater records `bootstrapRequired: true`. Ordinary CI audits
+   that state against the real pinned APK, but signed Actions builds fail clearly;
+   they never accept missing files, unpinned replacements, or fallback signing.
+4. For that first changed-input release only, after the PR is merged, use a clean
+   checkout at the current remote **main SHA**, with the updated ignored libraries
+   still present and the existing local production signing configuration:
+   ```sh
+   scripts/release-local.sh                # version/tag read from Common/build.gradle
+   # optional: scripts/release-local.sh --prerelease
+   ```
+   This owner-only command checks GitHub identity, the protected licensing flag,
+   clean source/main SHA and unused/increasing version first. It runs the canonical
+   `build-dist.sh all`, checks the inputs/source again, and uses the same verified
+   manifest/draft/upload/publish helper as Actions. It creates no vendor archive and
+   uploads only the normal five release assets. The explicit owner invocation is
+   the approval for this exceptional local publication; GitHub's environment
+   approval remains in place for normal Actions releases. Failed uploads leave a
+   hidden draft/tag to resolve before retrying, exactly like the normal workflow.
+5. After the release is published (normal Actions or local bootstrap), run:
+   ```sh
+   scripts/update-build-inputs.sh --baseline <published-version>
+   ```
+   It downloads the published primary phone APK, verifies the production certificate,
+   version, both ABIs, every desired library hash and absence of removed libraries,
+   then computes/pins the whole APK checksum and clears bootstrap state. It will
+   not pin a draft, unpublished local APK, wrong certificate or mismatched library
+   set. Commit this metadata-only change in an owner-reviewed PR. Once merged,
+   clean runners restore from that checksum-pinned release again; no private repo,
+   private download token, temporary binary secret or manual JSON editing is needed.
+
+Restoration never deletes or overwrites different local binaries. For a checkout
+left at an older library set, deliberately apply the vendor edit there or use a
+fresh checkout before restoring. Keep removal entries until the file is explicitly
+re-added by the updater; they prevent stale packaging even after rebasing.

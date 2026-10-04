@@ -55,27 +55,9 @@ jobs:
         with:
           name: distribution-all-${{ github.sha }}
           path: build/dist/all
-      - name: Verify release assets and generate updater manifest
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          python3 scripts/dist/dist.py verify --target all
-          scripts/make-update-manifest.sh build/dist/all > build/dist/all/update-manifest.json
-          python3 scripts/dist/dist.py release-check --tag "$TAG"
-      - name: Publish complete release
+      - name: Verify and publish complete release
         env:
           TAG: ${{ inputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # Repeat preflight after approval, in case another release appeared meanwhile.
-          python3 scripts/dist/release-preflight.py
-          flags=(--latest)
-          if [ "$PRERELEASE" = true ]; then flags=(--prerelease --latest=false); fi
-          # Draft first: partial uploads must never be visible to the updater.
-          # Atomically reserve the exact SHA; fail if anyone created the tag meanwhile.
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA"
-          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --draft
-          gh release upload "$TAG" build/dist/all/*.apk build/dist/all/update-manifest.json
-          gh release edit "$TAG" --draft=false "${flags[@]}"
-          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/dist/publish-release.py
