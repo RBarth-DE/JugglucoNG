@@ -45,4 +45,22 @@ class AiDexStaleGattWiringTests {
             assertTrue("$name must drop a stale gatt before anything else", guardFirst.containsMatchIn(manager))
         }
     }
+
+    @Test
+    fun connectionStateChangesUseTheSerializedIdentityGuardBeforeBookkeeping() {
+        assertTrue(manager.contains(
+            "override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) { " +
+                "if (!gattCallbacks.runIfCurrent(gatt) { handleConnectionStateChange(gatt, status, newState) })",
+        ))
+    }
+
+    @Test
+    fun characteristicCompletionsUseTheTestedDispatchGuard() {
+        assertTrue(manager.contains(
+            "gattCallbacks.completeOperation(gatt, characteristic.uuid, AiDexGattCallbacks.Kind.WRITE)",
+        ))
+        assertTrue(manager.contains(
+            "gattCallbacks.completeOperation(gatt, uuid, AiDexGattCallbacks.Kind.READ)",
+        ))
+    }
 }
