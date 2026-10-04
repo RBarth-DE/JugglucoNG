@@ -1,9 +1,36 @@
 # Notification modernization proposal
 
-Status: proposed feature plan for a documentation-only PR; it does not change
-the structural track order in [direction.md](direction.md). Reviewed 2026-09-27
-against main at 7b12a40d4. This is source and issue review only: no device
-reproduction or timing measurement has been completed.
+Status: startup/timestamp fixes merged in [PR #485](https://github.com/ctqvva/JugglucoNG/pull/485).
+[PR #504](https://github.com/ctqvva/JugglucoNG/pull/504) now contains only the
+bounded lifecycle fixes below. Rendering corrections and native text/vector
+presentation are separate follow-ups. No structural track changes are made.
+
+### Current lifecycle slice
+
+- Keep the last real reading and its reading-time header when it becomes stale.
+  Show the existing translated stale label; remove current chart, arrow and forecast.
+  Freshness deadlines remain best effort during Doze, with reconciliation on resume,
+  screen-on and clock changes.
+- Remove automatic timeout disappearance only from ongoing phone glucose content.
+  Preserve alarm and Wear lifetimes and genuine watch-mirroring delivery.
+- Coalesce data/status requests at the first queued one-second deadline, rather than
+  restarting the delay on each event. Resolve/render on the notification worker.
+- Invalidate superseded startup and visual work; service teardown cancels only work
+  owned by that service. Retry failed publication once through quiet reconciliation.
+- Keep service status only while existing service/display rules require it. Never
+  stop the service implicitly or rebroadcast a reading for a visual refresh.
+
+This PR uses the existing renderer and layouts. Glyph-height and compact-chart
+corrections can be reviewed separately, without holding up lifecycle bug fixes.
+The maintainer's next presentation recipe keeps DecoratedCustomViewStyle, uses
+real TextViews and resource vector arrows, and retains a bitmap chart. Bundled
+font support through XML must be checked in the actual System UI host before
+choosing a fallback. No animation or native-motion claim is made here.
+
+Validation includes focused freshness, refresh coalescing, startup supersession,
+service ownership and publication-recovery tests on phone and Wear. Full-app
+stale transitions and Doze still require device checks; a standalone presentation
+preview cannot validate those behaviors.
 
 ## Outcome and scope
 
