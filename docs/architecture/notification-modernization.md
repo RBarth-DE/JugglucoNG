@@ -27,6 +27,15 @@ real TextViews and resource vector arrows, and retains a bitmap chart. Bundled
 font support through XML must be checked in the actual System UI host before
 choosing a fallback. No animation or native-motion claim is made here.
 
+### Separate presentation corrections
+
+The sizing follow-up keeps the custom value hierarchy and font preferences. It
+bounds transported bitmap glyphs with actual font metrics and applies FIT_XY to
+the compact chart's 48dp container, while keeping the expanded chart at FIT_CENTER.
+Its dedicated phone layouts leave independent alarm and Wear surfaces unchanged.
+These are rendering corrections, not a native-motion redesign. Native TextView
+and vector-arrow rendering is a further, separately reviewable change.
+
 Validation includes focused freshness, refresh coalescing, startup supersession,
 service ownership and publication-recovery tests on phone and Wear. Full-app
 stale transitions and Doze still require device checks; a standalone presentation
@@ -40,8 +49,8 @@ compact and expanded layouts. It must work while the activity is closed and
 after process restart. Preserve ingestion, storage, calibration, units,
 sensor policy and independent glucose-alarm delivery.
 
-N0 and a trimmed N1 are the immediate reliability work. N2 through N5 remain
-deferred under D4. The primary surfaces are the dashboard adapter and ongoing
+The current slice advances N1 and the bounded N4 presentation described above.
+N2/N3 structural work and N5 remain deferred under D4. The primary surfaces are the dashboard adapter and ongoing
 phone notification. WidgetDisplaySource/ExpressiveAppWidget, Floating,
 GlucoseUpdateBroadcaster and other notification consumers remain compatibility
 surfaces; they are not implicitly migrated by N1.
@@ -53,7 +62,7 @@ serious design review. It does not add a lock-screen privacy preference.
 
 | Choice | Status and scope |
 | --- | --- |
-| Replace bitmap IBM Plex values | Conditionally supported for N4 where accessibility, scaling or rendering measurements justify it. M3 does not mandate a different font. List the effect on each `notification_font_*` preference before migration. |
+| Replace bitmap IBM Plex values | Custom presentation is approved to retain the intended hierarchy and app arrows. Preserve `notification_font_*` preferences; glyph bitmaps remain necessary for bundled IBM Plex in System UI. |
 | Lock-screen privacy option | Rejected for this work; preserve existing visibility choices. |
 | Journal action | Deferred to a separate interaction design proposal. |
 | No-sensor notification | Tentatively supported only as required by actual service and existing display modes; never stop the service implicitly. |
@@ -213,8 +222,9 @@ phone timeout/lifetime change separately. Test stale historical snapshots at
 
 ## Deferred work under D4 and P5
 
-Structural and behavior changes must not share a PR. N2 through N5 wait for
-D4's one structural track or an explicit amendment:
+Structural and behavior changes must not share a PR. N2/N3 and N5 wait for
+D4's structural slot; the maintainer-authorized N4 subset above is a feature change
+without that structural extraction. The broader proposal remains:
 
 | Step | Deliverable | Acceptance |
 | --- | --- | --- |
@@ -223,11 +233,13 @@ D4's one structural track or an explicit amendment:
 | N4 visual replacement | Improve compact/expanded hierarchy, native text/icons and chart accessibility after N1 is stable. Choose bitmap versus TextView per measured accessibility/performance and IBM Plex compatibility evidence; keep a bounded RemoteViews chart and useful standard notification text. | Units/locales, large fonts, TalkBack, light/dark, compact/expanded and multiple sensors. No journal action, privacy preference or frame-by-frame animation in this step. |
 | N5 alert presentation | Apply shared visual vocabulary to alarm cards and actions without changing alert lifetime, sound, DND, retries, alertwatch or Wear behavior. | Cold-start actions and alarm regressions pass; delivery remains independent. |
 
-Optional MetricStyle work is a later experiment, not an N1 dependency. The
-installed API 37 SDK contains Notification.MetricStyle (javap inspection of
+MetricStyle is not selected for this implementation. The installed API 37 SDK
+contains Notification.MetricStyle (javap inspection of
 $ANDROID_HOME/platforms/android-37.0/android.jar on 2026-09-27 showed
-addMetric, setCriticalMetric and setMetrics). Runtime availability, layout,
-locale/decimal behavior and supported-device behavior remain untested.
+addMetric, setCriticalMetric and setMetrics). A separate API 37 Pixel preview
+confirmed runtime availability, but did not retain the intended custom arrows
+and chart presentation. Broader locale and supported-device behavior remain
+unvalidated; the preview does not establish compatibility for this product.
 See the [MetricStyle reference](https://developer.android.com/reference/android/app/Notification.MetricStyle).
 Ordinary RemoteViews cannot host the Compose animation system; use System UI
 transitions and avoid frame-by-frame reposting. Live Update promotion remains
