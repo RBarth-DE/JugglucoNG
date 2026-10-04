@@ -131,3 +131,36 @@ Configured System (Google Sans on this Pixel):
 Switched back to IBM Plex:
 
 ![IBM Plex reapplied](evidence/font-fixed-ibm-reapplied.png)
+
+
+## Scaled spacing repair, 2026-10-05
+
+The split value/vector layout introduced fixed 8dp primary-arrow, 4dp peer-arrow
+and 12dp sensor margins. Restore the old painter's spacing proportions instead:
+arrow gap = primary text pixels × 2.5/22; sensor gap = primary text pixels × 8/22.
+The arrow ImageView includes this gap in its max width so padding does not reduce
+the vector's square. Start padding follows layout direction. Drawable geometry
+and font policy are unchanged.
+
+The production presenter/resources were checked in the Pixel shade at 1.0 and
+0.6 size with IBM Plex, and at 0.6 with System/Google Sans. Compact and expanded
+content render, and the small readout has a proportionately smaller gap. The
+separate preview was removed and the installed CGM app was unchanged.
+
+```sh
+adb -s "$probe_serial" shell am start -S -W -n tk.glucodata.nativeviewprobe/.ProbeActivity --ez production true --ez ibm true --ei step 0 --ef scale 1.0
+adb -s "$probe_serial" shell am broadcast -n tk.glucodata.nativeviewprobe/.ProbeReceiver --ez production true --ez ibm true --ei step 0 --ef scale 0.6
+adb -s "$probe_serial" shell am broadcast -n tk.glucodata.nativeviewprobe/.ProbeReceiver --ez production true --ez ibm false --ei step 0 --ef scale 0.6
+```
+
+Normal IBM:
+
+![Normal spacing](evidence/spacing-normal-value.png)
+
+Small IBM:
+
+![Small spacing](evidence/spacing-small-value.png)
+
+Small System/Google Sans:
+
+![Small system spacing](evidence/spacing-system-small-value.png)
