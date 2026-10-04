@@ -113,13 +113,14 @@ def notes(sha, tag, previous):
     version, code = dist.version()
     changes = (f'https://github.com/{REPO}/compare/{previous["tag_name"]}...{sha}' if previous
                else f'https://github.com/{REPO}/commit/{sha}')
+    changes_label = 'Changes since the previous nightly' if previous else 'Source commit (first nightly)'
     return f'''<!-- juggluco-nightly:{sha} -->
 > **Experimental nightly — for testing only.** Automatically built from merged main changes.
 > May contain untested changes affecting readings, alarms or sensor connectivity.
 > Do not rely on this build for treatment decisions or critical alarms.
 
 Nightly **{day} (UTC)**, source [{sha}](https://github.com/{REPO}/commit/{sha}).
-[Changes since the previous nightly]({changes}).
+[{changes_label}]({changes}).
 
 These production-signed APKs replace the matching existing installation and keep its data.
 Back up settings/data before testing. Choose phone, phone-dub, wear or wear-dub as appropriate.
