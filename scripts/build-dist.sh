@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 target="${1:-phone}"
 shift "$(( $# > 0 ? 1 : 0 ))"
+case "$target" in watch) target=wear ;; watch-all) target=wear-all ;; esac
 case "$target" in phone|phone-all|wear|wear-all|all) ;; *) echo "Usage: $0 {phone|phone-all|wear|wear-all|all} [Gradle options]" >&2; exit 2 ;; esac
 # ABI selection has one source, so verification cannot disagree with Gradle.
 for arg in "$@"; do
