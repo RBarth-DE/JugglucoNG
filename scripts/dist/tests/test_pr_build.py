@@ -77,13 +77,27 @@ class PrSnapshot(unittest.TestCase):
         good = {'state': 'approved', 'user': {'id': pr_build.OWNER_ID},
                 'environments': [{'name': pr_build.REVIEW_ENVIRONMENT}]}
         reviews = [[], [dict(good, state='rejected')], [dict(good, user={'id': 65550090})],
-                   [dict(good, environments=[{'name': 'production-signing'}])]]
+                   [dict(good, environments=[{'name': 'production-signing'}])],
+                   [good, dict(good, state='rejected')]]
         with patch.dict(os.environ, {'GITHUB_RUN_ID': '123'}):
             for history in reviews:
                 with patch.object(pr_build, 'api', return_value=history), self.assertRaisesRegex(ValueError, 'owner approval'):
                     pr_build.check_approval()
             with patch.object(pr_build, 'api', return_value=[good]):
                 pr_build.check_approval()
+
+    def test_no_restore_or_verification_before_owner_approval(self):
+        env = {'GITHUB_REPOSITORY': pr_build.REPOSITORY, 'GITHUB_REF': 'refs/heads/main',
+               'GITHUB_RUN_ID': '123', **{k.upper(): v for k, v in EXPECTED.items()}}
+        for command in ['restore', 'verify']:
+            with patch.dict(os.environ, env), patch.object(sys, 'argv', ['pr-build.py', command]), \
+                 patch.object(pr_build, 'api', side_effect=[PR, []]), \
+                 patch.object(pr_build.dist, 'restore') as restore, \
+                 patch.object(pr_build, 'verify') as verify:
+                with self.assertRaisesRegex(ValueError, 'owner approval'):
+                    pr_build.main()
+                restore.assert_not_called()
+                verify.assert_not_called()
 
 
 class ApprovedCheckout(unittest.TestCase):

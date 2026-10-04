@@ -61,7 +61,7 @@ def check_approval():
     relevant = [r for r in reviews if any(e['name'] == REVIEW_ENVIRONMENT for e in r['environments'])]
     # The job dependency enforces the environment gate. Also reject missing,
     # bypassed or non-owner review history before executing any approved source.
-    if not relevant or relevant[0]['state'] != 'approved' or relevant[0]['user']['id'] != OWNER_ID:
+    if not relevant or any(r['state'] != 'approved' or r['user']['id'] != OWNER_ID for r in relevant):
         raise ValueError('This run needs explicit owner approval of production-pr-review')
 
 
