@@ -110,13 +110,7 @@ jobs:
       # package from surfacing as an unrelated CMake configure error. Versions
       # are read from Common/build.gradle so this cannot drift from the build.
       - name: Install NDK and CMake
-        run: |
-          set -euo pipefail
-          ndk=$(sed -n "s/^ *ndkver *= *'\(.*\)'.*/\1/p" Common/build.gradle)
-          cmake=$(sed -n "s/^ *CMAKEVERSION *= *'\(.*\)'.*/\1/p" Common/build.gradle)
-          echo "NDK=$ndk CMake=$cmake"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$ndk" "cmake;$cmake"
+        run: scripts/dist/install-sdk.sh
 
       - uses: gradle/actions/setup-gradle@v6
 
