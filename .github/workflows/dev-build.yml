@@ -54,6 +54,7 @@ jobs:
     secrets: inherit
     with:
       target: ${{ needs.request.outputs.target }}
+      test_artifacts: true
   approve-pr:
     needs: request
     if: needs.request.outputs.accepted == 'true' && needs.request.outputs.pr_number != ''
@@ -164,8 +165,8 @@ jobs:
         with:
           name: distribution-pr${{ needs.request.outputs.pr_number }}-${{ needs.request.outputs.target }}-${{ needs.request.outputs.source_sha }}
           path: |
-            source/build/dist/${{ needs.request.outputs.target }}/*.apk
-            source/build/dist/${{ needs.request.outputs.target }}/build-info.json
+            source/build/dist/test/${{ needs.request.outputs.target }}/*.apk
+            source/build/dist/test/${{ needs.request.outputs.target }}/build-info.json
           if-no-files-found: error
           retention-days: 7
       - name: Download instructions
