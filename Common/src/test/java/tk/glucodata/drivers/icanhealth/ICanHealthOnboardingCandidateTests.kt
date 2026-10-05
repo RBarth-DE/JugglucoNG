@@ -57,4 +57,33 @@ class ICanHealthOnboardingCandidateTests {
         assertTrue(ICanHealthConstants.isICanHealthDevice("SN9150002398"))
         assertTrue(ICanHealthConstants.isICanHealthDevice("83D005442574"))
     }
+
+    @Test
+    fun nameFallbackIsSkippedWhenTheAdvertListsNonCgmServices() {
+        // Trace juggluco-trace-20261005-084717.log: the "SatelliteOnline5885" glucometer
+        // advertises a Nordic UART service (6e400001) and no 0x181F; the broad name fallback
+        // must not claim it and connect twice before the post-connect rejection.
+        val nus = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
+        assertFalse(
+            ICanHealthConstants.advertisesCgmOrNoService(
+                serviceUuids = listOf(gap, gattService, nus),
+                serviceDataKeys = emptyList(),
+            )
+        )
+    }
+
+    @Test
+    fun nameFallbackIsKeptForAdvertsWithoutServicesOrWithTheCgmService() {
+        // The Anytime "SN9150002398" transmitter advertises no service UUIDs, and the real
+        // Sinocare CGM advertises 0x181F; both must still be tried.
+        assertTrue(ICanHealthConstants.advertisesCgmOrNoService(emptyList(), emptyList()))
+        assertTrue(
+            ICanHealthConstants.advertisesCgmOrNoService(
+                serviceUuids = listOf(gap, ICanHealthConstants.CGM_SERVICE),
+                serviceDataKeys = emptyList(),
+            )
+        )
+        // 0x181F carried only as service data still counts.
+        assertTrue(ICanHealthConstants.advertisesCgmOrNoService(emptyList(), listOf(ICanHealthConstants.CGM_SERVICE)))
+    }
 }

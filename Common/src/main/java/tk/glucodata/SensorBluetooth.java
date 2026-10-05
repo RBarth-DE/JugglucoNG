@@ -192,7 +192,7 @@ public class SensorBluetooth {
 
             if (deviceName != null) {
                 for (var cb : gattcallbacks) {
-                    if (cb.matchDeviceName(deviceName, address)) {
+                    if (cb.matchDeviceName(deviceName, address, scanResult)) {
                         cb.mDeviceName = deviceName;
                         return cb;
                     }
