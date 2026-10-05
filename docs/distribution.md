@@ -126,6 +126,14 @@ Download the ZIP from the run's **Artifacts** section (7-day retention), or use
 can use the CLI command. Workflow dispatch requires repository write access,
 which is why the comment command exists for JetFoxy. No PAT or GitHub App is needed.
 
+After a successful comment-requested build, GitHub Actions automatically replies
+on the requesting PR/issue with a direct artifact ZIP link, its expiry, the exact
+source commit and a test-build warning. Download requires GitHub sign-in. A rerun
+updates the same bot reply; failed/rejected builds never post a ready link.
+Workflow dispatch continues to use the run's Artifacts section. The reply job runs
+only trusted main code, has `issues: write` and `actions: read`, and has no signing
+secrets or `contents: write`. Signing jobs retain read-only repository permissions.
+
 ## Automated nightlies
 
 **Nightly prerelease** runs daily at **00:23 UTC / 05:23 Asia/Yekaterinburg**.
@@ -311,3 +319,62 @@ Restoration never deletes or overwrites different local binaries. For a checkout
 left at an older library set, deliberately apply the vendor edit there or use a
 fresh checkout before restoring. Keep removal entries until the file is explicitly
 re-added by the updater; they prevent stale packaging even after rebasing.
+
+### Example: CareSens Air (`libCALCULATION.so`, PR #542)
+
+Rebase the driver PR onto current main first so it contains the current canonical
+build scripts. In that checkout, restore the existing inputs **before** adding
+the new library:
+
+```sh
+scripts/restore-build-inputs.sh
+# Obtain approved/provenance-checked copies for both ABIs and place them at:
+# Common/src/main/jniLibs/arm64-v8a/libCALCULATION.so
+# Common/src/main/jniLibs/armeabi-v7a/libCALCULATION.so
+scripts/update-build-inputs.sh
+git diff -- scripts/dist/build-inputs.json
+git add scripts/dist/build-inputs.json
+git commit -m 'Inventory CareSens Air vendor algorithms'
+scripts/build-dist.sh phone --no-daemon --no-configuration-cache
+```
+
+The script records both files' exact sizes/hashes automatically. Since 1.2.2's
+pinned APK does not supply them, it also records `bootstrapRequired: true`.
+This is expected. Local builds work with these exact ignored files; share only
+the verified `build/dist/phone/*.apk` with the tester once redistribution of the
+new algorithm **inside that APK** is authorized. Do not upload the standalone
+libraries or use `git add -f`. This PR requires both ARM binaries; a missing Air
+algorithm can still compile and pair but cannot produce glucose. Verify the
+vendor ABI/exported algorithm against the driver and perform real-sensor tests.
+
+**`/build-dist phone` cannot fetch new bytes from your laptop.** For this bootstrap
+state, it fails at restoration rather than shipping an APK without the algorithm.
+An Actions artifact is not a vendor baseline, and requesting a signed build is
+not a grant of redistribution rights. The existing licensing flag does not
+establish rights for this newly added library.
+
+After testing, merge the inventory/driver/version changes. At clean current remote
+main with the ignored libraries still present, run `scripts/release-local.sh` as
+above. Use `--prerelease` if the first published baseline should remain a testing
+release. Then run `scripts/update-build-inputs.sh --baseline <published-version>`
+and commit/merge that metadata PR. Actions can now reproduce the same libraries
+from the pinned published phone APK, including subsequent approved PR test builds.
+A bootstrap prerelease already reserves its version tag; promote that existing
+release in GitHub when ready, or bump the version for a later normal release.
+
+If you need **Actions testing before merging the Air driver**, put just the
+generated inventory and version bump in a separate owner-reviewed PR to main.
+Publish its local bootstrap prerelease with the new ignored libraries, then merge
+the new-baseline metadata PR. This makes the library available reproducibly
+without activating the driver. Rebase #542 onto that main and request
+`/build-dist phone` there; the usual exact-head owner approval then builds the
+unmerged driver with the new library. No temporary binary upload mechanism is
+needed. Local testing above is the shorter path when cloud testing is unnecessary.
+
+For a **replacement**, overwrite the ignored file(s) and run the same inventory,
+local-test and bootstrap/rebaseline sequence. For a **removal**, delete the file(s),
+update the driver as needed and run the updater: it records `removedFiles` and
+rejects stale APKs that still contain them. Removal alone normally keeps Actions
+working against the old baseline, because all remaining bytes are still present
+there. Never regenerate from a partially restored checkout: absent libraries
+would look like intentional removals.
