@@ -107,8 +107,14 @@ job uses the existing four environment secrets and canonical `build-dist.sh`/
 Gradle signing. A trusted-main verifier independently checks the production pin,
 package/version, both ARM ABIs and inventoried JNI bytes before artifact upload.
 
-Artifacts are named `distribution-pr547-phone-<full-head-SHA>` and contain APKs
-plus `build-info.json` with source/controller commits and APK checksums. These
+Artifacts are named `distribution-pr547-phone-<full-head-SHA>` for PRs and
+`distribution-main-phone-<full-source-SHA>` for main. The actual APK files are
+`JugglucoNG-test-pr547-<12-character-head-SHA>-phone.apk` or
+`JugglucoNG-test-main-<12-character-source-SHA>-phone.apk`; other variants end in
+`phone-dub`, `wear`, or `wear-dub`. Each archive includes `build-info.json` with
+the full source commit, named APKs and their checksums; PR metadata also records
+the trusted controller commit and signing certificate. Renaming copies preserves
+the signed APK bytes and canonical local/release build outputs. These
 APKs **update the matching existing installation**, retaining its data; a
 normal-phone APK cannot update a dub installation. Android can reject a downgrade
 if the tester already has a higher versionCode; update the PR's version normally
