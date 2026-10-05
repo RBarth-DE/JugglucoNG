@@ -127,5 +127,3 @@ says "no behaviour change" but changes behaviour is a finding.
 - Much of the Java is upstream code with its own formatting, including
   `{if(doLog) {...};};` logging wrappers. Leave it alone unless the PR changes
   those lines.
-- The MQ driver is low priority for the maintainer; do not raise findings
-  against it.
