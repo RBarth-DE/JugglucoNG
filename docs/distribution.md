@@ -135,8 +135,12 @@ production-signed APKs plus `update-manifest.json`, and posts a prerelease title
 **Nightly YYYY-MM-DD**. Dates are UTC; tags are
 `nightly-YYYY-MM-DD-<12-character-main-SHA>` so different snapshots on one date
 do not overwrite each other. Notes start with an experimental/testing warning,
-identify the exact source and link changes since the previous nightly. Internal
-APK names/version codes remain canonical; successive nightlies can show the same
+identify the exact source and link changes since the previous nightly. APK files
+are named `JugglucoNG-nightly-YYYY-MM-DD-<12-character-main-SHA>-phone.apk`,
+with `phone-dub`, `wear` and `wear-dub` for the other variants. The manifest's
+file entries use these published names. Verified APK bytes/signatures are unchanged;
+regular-release filenames keep their version-based names. Internal
+APK version names/codes remain canonical; successive nightlies can show the same
 app version. They update the matching existing app, so back up settings/data
 before testing. They do not become GitHub's latest release or enter the normal
 in-app updater, which excludes prereleases.
