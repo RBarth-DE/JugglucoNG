@@ -1126,7 +1126,10 @@ class ICanHealthBleManager(
     override fun mygetDeviceName(): String =
         serialFromDevice?.takeIf { it.isNotBlank() } ?: super.mygetDeviceName()
 
-    override fun matchDeviceName(deviceName: String?, address: String?): Boolean {
+    override fun matchDeviceName(deviceName: String?, address: String?): Boolean =
+        matchDeviceName(deviceName, address, null)
+
+    override fun matchDeviceName(deviceName: String?, address: String?, scanResult: ScanResult?): Boolean {
         val trimmedName = deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val candidateAddress = address?.trim()?.uppercase(Locale.US)
         if (candidateAddress != null && candidateAddress in rejectedOnboardingAddresses) {
@@ -1136,10 +1139,13 @@ class ICanHealthBleManager(
         if (knownAddress != null) {
             return address != null && address.equals(knownAddress, ignoreCase = true)
         }
-        return notePickedByOnboardingScan(candidateAddress, matchesUnaddressedName(trimmedName))
+        return notePickedByOnboardingScan(
+            candidateAddress,
+            matchesUnaddressedName(trimmedName, scanResult),
+        )
     }
 
-    private fun matchesUnaddressedName(trimmedName: String): Boolean {
+    private fun matchesUnaddressedName(trimmedName: String, scanResult: ScanResult?): Boolean {
         val expectedDisplayName = mygetDeviceName().trim().takeIf { it.isNotEmpty() }
         if (expectedDisplayName != null && trimmedName.equals(expectedDisplayName, ignoreCase = true)) {
             return true
@@ -1151,7 +1157,20 @@ class ICanHealthBleManager(
         if (serialFromDevice != null && advertisedCanonical.equals(serialFromDevice, ignoreCase = true)) {
             return true
         }
-        return ICanHealthConstants.isICanHealthDevice(trimmedName)
+        if (!ICanHealthConstants.isICanHealthDevice(trimmedName)) {
+            return false
+        }
+        // The broad name fallback (any 12-32 char alnum name) also matches a UART
+        // glucometer or an Anytime serial. If the advertisement lists services but not
+        // 0x181F, it is not our CGM: refuse it now instead of connecting twice before the
+        // post-connect strike rejection. Adverts with no service UUIDs are still tried
+        // (some iCan firmware omits 0x181F), and exact serial/name matches above are never
+        // gated.
+        val record = scanResult?.scanRecord ?: return true
+        return ICanHealthConstants.advertisesCgmOrNoService(
+            record.serviceUuids.orEmpty().map { it.uuid },
+            record.serviceData?.keys.orEmpty().map { it.uuid },
+        )
     }
 
     private fun notePickedByOnboardingScan(address: String?, matched: Boolean): Boolean {
