@@ -57,7 +57,7 @@ class LiveCalibrationPolicyTests {
         assertTrue(publish.contains("LiveReadingLanes.stock(reading.displayValue, Float.NaN)"))
         assertTrue(publish.contains("preferredSensorId = id"))
         assertTrue(publish.contains("preferIncomingSample = true"))
-        assertTrue(publish.contains("processExternalCurrentReading(id, display.primaryValue, display.rate"))
+        assertTrue(publish.contains("processExternalCurrentReading(id, display.primaryValue, display.rate, display.timeMillis"))
         assertFalse(publish.contains("processExternalCurrentReading(id, reading.displayValue"))
         assertFalse(ottai.contains("handleGlucoseResult("))
     }

@@ -130,7 +130,8 @@ object CurrentDisplaySource {
      * tick to the next: any difference fires an alert and clears it again.
      * [preferIncomingSample] prevents a neighboring history timestamp from replacing
      * a known live sample while its storage write is pending. Earlier samples still
-     * participate in configured smoothing and trend estimation.
+     * participate in configured smoothing and trend estimation, but chunk collapsing
+     * cannot remove the incoming sample from live publication.
      */
     @JvmStatic
     @JvmOverloads
@@ -188,7 +189,8 @@ object CurrentDisplaySource {
         isMmol: Boolean,
         smoothingMode: SmoothingMode,
         sensorId: String?,
-        preferIncomingSample: Boolean = false
+        preferIncomingSample: Boolean = false,
+        nowMillis: Long = System.currentTimeMillis()
     ): Snapshot? {
         val processedPoints = prepareRecentPointsForCurrent(
             recentPoints = recentPoints,
@@ -198,10 +200,11 @@ object CurrentDisplaySource {
             smoothAllData = smoothingMode.smoothAllData,
             smoothingMinutes = smoothingMode.smoothingMinutes,
             collapseChunks = smoothingMode.collapseChunks,
+            nowMillis = nowMillis,
             preferIncomingSample = preferIncomingSample
         )
         val targetTime = exchangeTargetTimeMillis(
-            collapseChunks = smoothingMode.collapseChunks,
+            collapseChunks = smoothingMode.collapseChunks && !preferIncomingSample,
             processedPoints = processedPoints,
             liveTimeMillis = current?.timeMillis
         )
@@ -278,7 +281,9 @@ object CurrentDisplaySource {
             DataSmoothing.smoothNativePoints(
                 pointsWithCurrent,
                 smoothingMinutes,
-                collapseChunks,
+                // Chunk collapsing is presentation thinning. A known incoming sample
+                // must remain available at its own timestamp for live publication.
+                collapseChunks && !preferIncomingSample,
                 nowMillis
             )
         } else {

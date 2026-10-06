@@ -3620,8 +3620,8 @@ class OttaiBleManager(
             preferIncomingSample = true,
         ) ?: return
         markLocalReadingAccepted(reading.sampleMs)
-        SuperGattCallback.processExternalCurrentReading(id, display.primaryValue, display.rate, reading.sampleMs, SENSOR_GEN)
-        Log.i(TAG, "current publish sec=${reading.sampleMs / 1000L} display=%.2f stockMgdl=%.1f".format(display.primaryValue, reading.mgdl))
+        SuperGattCallback.processExternalCurrentReading(id, display.primaryValue, display.rate, display.timeMillis, SENSOR_GEN)
+        Log.i(TAG, "current publish sec=${display.timeMillis / 1000L} display=%.2f stockMgdl=%.1f".format(display.primaryValue, reading.mgdl))
     }
 
     private fun resolveSampleTimeMs(

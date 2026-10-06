@@ -85,21 +85,60 @@ class OttaiLiveCalibrationTests {
         }
     }
 
+    @Test
+    fun openChunkCannotReplaceLiveLowOrHighWithCompletedChunkValue() {
+        val minute = 60_000L
+        val time = (TIME / (5 * minute)) * (5 * minute) + minute
+        val mode = CurrentDisplaySource.SmoothingMode(true, 5, true)
+        for (isMmol in listOf(true, false)) {
+            val scale = if (isMmol) 1f else 18.0182f
+            withCalibration(1.4f * scale) {
+                for (viewMode in listOf(0, 2)) {
+                    for ((stockMmol, type) in listOf(2.3f to AlertType.LOW, 8.3f to AlertType.HIGH)) {
+                        val history = listOf(
+                            GlucosePoint(time - 3 * minute, 3.7f * scale, 0f),
+                            GlucosePoint(time - 2 * minute, 3.7f * scale, 0f),
+                        )
+                        val display = resolve(LiveReadingLanes.stock(stockMmol * scale, Float.NaN),
+                            history, viewMode, isMmol, timeMillis = time, smoothingMode = mode)
+                        assertEquals("live value replaced by a completed chunk", (stockMmol + 1.4f) * scale,
+                            display.primaryValue, 0.001f)
+                        assertEquals("live value moved to an older timestamp", time, display.timeMillis)
+                        val active = StandardGlucoseAlertEvaluator.resolveActive(
+                            glucoseValue = display.primaryValue,
+                            rate = 0f,
+                            configs = mapOf(type to AlertConfig(type, enabled = true,
+                                threshold = (if (type == AlertType.LOW) 3.9f else 9.0f) * scale)),
+                            alertTypes = listOf(type),
+                            isMmol = isMmol,
+                            isConfigActive = { true },
+                        )
+                        assertTrue("missed $type while the live bucket is open", type in active)
+                    }
+                }
+            }
+        }
+    }
+
     private fun resolve(
         reading: LiveReadingLanes,
         history: List<GlucosePoint>,
         viewMode: Int,
         isMmol: Boolean,
         preferIncomingSample: Boolean = true,
+        timeMillis: Long = TIME,
+        smoothingMode: CurrentDisplaySource.SmoothingMode = CurrentDisplaySource.SmoothingMode(false, 0, false),
+        nowMillis: Long = timeMillis,
     ) = requireNotNull(CurrentDisplaySource.resolveSnapshot(
-        current = CurrentGlucoseSource.Snapshot.of(reading, TIME, "", 0f, SENSOR, 0, 0, "ottai-live"),
+        current = CurrentGlucoseSource.Snapshot.of(reading, timeMillis, "", 0f, SENSOR, 0, 0, "ottai-live"),
         recentPoints = history,
-        historyStart = TIME - 120_000L,
+        historyStart = timeMillis - 600_000L,
         viewMode = viewMode,
         isMmol = isMmol,
-        smoothingMode = CurrentDisplaySource.SmoothingMode(false, 0, false),
+        smoothingMode = smoothingMode,
         sensorId = SENSOR,
         preferIncomingSample = preferIncomingSample,
+        nowMillis = nowMillis,
     ))
 
     private fun isLow(value: Float, isMmol: Boolean, scale: Float) = AlertType.LOW in
