@@ -137,11 +137,11 @@ def gatt(directory):
         'public void onConnectionStateChange(', 'public final boolean hasLocallyConnectedGatt('])
     air_methods = '\n'.join(method(air, signature) for signature in [
         'private boolean isCurrentGatt(', 'private synchronized void enableNotificationIfCurrent(',
-        'public synchronized void onConnectionStateChange(',
-        'public synchronized void onServicesDiscovered(',
-        'public synchronized void onCharacteristicWrite(',
-        'public synchronized void onCharacteristicChanged(',
-        'public synchronized void onMtuChanged(',
+        'public void onConnectionStateChange(',
+        'public void onServicesDiscovered(',
+        'public void onCharacteristicWrite(',
+        'public void onCharacteristicChanged(',
+        'public void onMtuChanged(',
         'private void afterReads(', 'private void enableDataOrBond('])
     fixture = r'''
 package tk.glucodata;

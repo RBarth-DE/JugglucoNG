@@ -96,12 +96,15 @@ static void airsavehistory(SensorGlucoseData *sens,
                            const air1_opcal4_output_t &output) {
   const int lastid = output.seq_number_final;
   const uint32_t lasttime = output.measurement_time_standard;
+  // The ids come from the vendor library; history is mapped for maxpos() slots.
+  const int maxid = sens->maxpos();
+  const auto inhistory = [maxid](int id) { return id > 0 && id < maxid; };
 
   int firstid = 0, endhistory = 0;
   for (int i = 0; i < 6; ++i) {
     const int id = output.smooth_seq[i];
     const double mgdL = output.smooth_result_glucose[i];
-    if (id && mgdL > 0.0) {
+    if (inhistory(id) && mgdL > 0.0) {
       if (!firstid)
         firstid = id;
       const uint32_t time = (id - lastid) * 5 * 60 + lasttime;
@@ -121,7 +124,7 @@ static void airsavehistory(SensorGlucoseData *sens,
   }
   {
     const double mgdLdouble = output.result_glucose;
-    if (mgdLdouble > 0.0) {
+    if (inhistory(lastid) && mgdLdouble > 0.0) {
       const int mgL = std::round(mgdLdouble * 10.0);
       Glucose *item = sens->getglucose(lastid);
       item->time = lasttime;

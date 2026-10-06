@@ -83,6 +83,10 @@ class AirGattCallback extends SuperGattCallback {
     private boolean receiveNotes = false;
     final private String AppID = "csair";
 
+    // The GATT callbacks below check identity but must not hold this monitor:
+    // they call into SensorBluetooth (scanStarter) and other callbacks
+    // (othersworking -> connectDevice), while SensorBluetooth.removeDevice holds
+    // its own lock and then calls free() here. Holding both ways deadlocks.
     private boolean isCurrentGatt(BluetoothGatt gatt) {
         return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
     }
@@ -94,7 +98,7 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public synchronized void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
+    public void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         BluetoothGattCharacteristic characteristic = bluetoothGattDescriptor.getCharacteristic();
@@ -178,7 +182,7 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public synchronized void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
+    public void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
         noteFirstGattCallback("onConnectionStateChange", bluetoothGatt);
         if (!acceptConnectionAttemptCallback(bluetoothGatt, newState) || dataptr == 0L)
             return;
@@ -294,7 +298,7 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public synchronized void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
+    public void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         if (doLog) {Log.i(LOG_ID, "BLE onServicesDiscovered, status: " + status);}
@@ -307,7 +311,7 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public synchronized void onCharacteristicRead(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+    public void onCharacteristicRead(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         switch (status) {
@@ -428,7 +432,7 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public synchronized void onCharacteristicWrite(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
+    public void onCharacteristicWrite(BluetoothGatt bluetoothGatt, BluetoothGattCharacteristic bluetoothGattCharacteristic, int status) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         if (doLog)
@@ -743,7 +747,7 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @Override
-    public synchronized void onCharacteristicChanged(@NonNull BluetoothGatt bluetoothGatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
+    public void onCharacteristicChanged(@NonNull BluetoothGatt bluetoothGatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         final String uuidstr = bluetoothGattCharacteristic.getUuid().toString();
@@ -766,7 +770,7 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     @Override
-    public synchronized void onMtuChanged(BluetoothGatt bluetoothGatt, int mtu, int status) {
+    public void onMtuChanged(BluetoothGatt bluetoothGatt, int mtu, int status) {
         if (!isCurrentGatt(bluetoothGatt))
             return;
         if (status == GATT_SUCCESS) {

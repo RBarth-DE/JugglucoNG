@@ -26,7 +26,9 @@ public final class SensorSourceResolver {
             case SENSOR_KIND_DEXCOM -> "G7";
             case SENSOR_KIND_SIBIONICS -> "GS1Sb";
             case SENSOR_KIND_ACCUCHEK -> "AccuChek";
-            case SENSOR_KIND_AIDEX, SENSOR_KIND_CARESENS_AIR, SENSOR_KIND_UNKNOWN -> "Libre2";
+            // Upstream Juggluco's spelling, so consumers see the same name from both apps.
+            case SENSOR_KIND_CARESENS_AIR -> "CareSenseAir";
+            case SENSOR_KIND_AIDEX, SENSOR_KIND_UNKNOWN -> "Libre2";
             default -> "Libre2";
         };
     }
