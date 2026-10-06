@@ -131,8 +131,10 @@ on the requesting PR/issue with a direct artifact ZIP link, its expiry, the exac
 source commit and a test-build warning. Download requires GitHub sign-in. A rerun
 updates the same bot reply; failed/rejected builds never post a ready link.
 Workflow dispatch continues to use the run's Artifacts section. The reply job runs
-only trusted main code, has `issues: write` and `actions: read`, and has no signing
-secrets or `contents: write`. Signing jobs retain read-only repository permissions.
+only trusted main code, has `issues: write` and `pull-requests: write` for issue/PR
+replies plus `actions: read`, and has no signing secrets or `contents: write`.
+The Actions App token needs the PR scope even though timeline comments use the
+`issues/.../comments` API. Signing jobs retain read-only repository permissions.
 
 ## Automated nightlies
 
