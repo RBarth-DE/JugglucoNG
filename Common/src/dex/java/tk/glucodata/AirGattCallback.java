@@ -87,6 +87,11 @@ class AirGattCallback extends SuperGattCallback {
     // they call into SensorBluetooth (scanStarter) and other callbacks
     // (othersworking -> connectDevice), while SensorBluetooth.removeDevice holds
     // its own lock and then calls free() here. Holding both ways deadlocks.
+    // dataptr's lifetime is guarded by nativeLock instead. It is held only around
+    // the native calls, which never call back into Java, so it is a leaf lock:
+    // free() takes it after this monitor, and nothing holding it waits for another.
+    private final Object nativeLock = new Object();
+
     private boolean isCurrentGatt(BluetoothGatt gatt) {
         return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
     }
@@ -502,7 +507,12 @@ class AirGattCallback extends SuperGattCallback {
 
     private void onChar11Changed(BluetoothGatt bluetoothGatt, byte[] value) {
         long[] timeptr = {System.currentTimeMillis()};
-        long res = Natives.airProcessData(dataptr, value, timeptr);
+        final long res;
+        synchronized (nativeLock) {
+            if (dataptr == 0L)
+                return;
+            res = Natives.airProcessData(dataptr, value, timeptr);
+        }
         if (res == 3L) {
             if (!noticedNumberRecords) {
                 numberRecords(bluetoothGatt);
@@ -576,7 +586,12 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     private void requestData(BluetoothGatt bluetoothGatt) {
-        int lastval = Natives.airGetLast(dataptr);
+        final int lastval;
+        synchronized (nativeLock) {
+            if (dataptr == 0L)
+                return;
+            lastval = Natives.airGetLast(dataptr);
+        }
         if (lastval < 0) {
             disconnect();
             return;
@@ -633,7 +648,13 @@ class AirGattCallback extends SuperGattCallback {
             }
             if (doLog)
                 Log.i(LOG_ID, "getApplicationInfo deviceTime: " + timestring(deviceTimeSecs * 1000L) + ", UserID: " + userID + ", DataCountPerSet: " + dataCountperSet + ", AdcInterval: " + AdcInterval);
-            if (Natives.airGetLast(dataptr) <= 0) {
+            final int last;
+            synchronized (nativeLock) {
+                if (dataptr == 0L)
+                    return;
+                last = Natives.airGetLast(dataptr);
+            }
+            if (last <= 0) {
                 setAppInfo(bluetoothGatt);
             } else if (syncTime) {
                 sendSyncTime(bluetoothGatt);
@@ -657,13 +678,23 @@ class AirGattCallback extends SuperGattCallback {
                 vref = characteristic.getIntValue(FORMAT_UINT32, 6) / 1.0E7f;
             }
             int elapsedSecs = characteristic.getIntValue(FORMAT_UINT32, 10);
-            Natives.airSaveStartSensor(dataptr, eapp, vref, elapsedSecs);
+            synchronized (nativeLock) {
+                if (dataptr == 0L)
+                    return;
+                Natives.airSaveStartSensor(dataptr, eapp, vref, elapsedSecs);
+            }
             askSensorInfo(bluetoothGatt);
             return;
         }
 
         if (firstByte == 0xC2 && secondByte == 1) {
-            if (!Natives.airSaveSensorInfo(dataptr, value)) {
+            final boolean saved;
+            synchronized (nativeLock) {
+                if (dataptr == 0L)
+                    return;
+                saved = Natives.airSaveSensorInfo(dataptr, value);
+            }
+            if (!saved) {
                 disconnect();
                 return;
             }
@@ -673,7 +704,11 @@ class AirGattCallback extends SuperGattCallback {
         }
         if (firstByte == 0xC2 && secondByte == 2) {
             appendForCrc(value);
-            Natives.airSaveSensorInfo2(dataptr, value);
+            synchronized (nativeLock) {
+                if (dataptr == 0L)
+                    return;
+                Natives.airSaveSensorInfo2(dataptr, value);
+            }
             return;
         }
         if (firstByte == 0xC2 && secondByte == 3) {
@@ -878,6 +913,9 @@ class AirGattCallback extends SuperGattCallback {
     synchronized void free() {
         cancelalarm();
         unbond();
-        super.free();
+        // Waits out a native call already in progress; later ones see dataptr == 0.
+        synchronized (nativeLock) {
+            super.free();
+        }
     }
 }
