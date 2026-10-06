@@ -33,7 +33,8 @@ class OttaiLiveCalibrationTests {
                         // The external float API marks this value resolved. Both alert
                         // engines and the retained current reading must keep 5.1, not
                         // bypass calibration at 3.7 or apply the correction twice at 6.5.
-                        val alert = resolve(LiveReadingLanes.resolved(display.primaryValue), history, viewMode, isMmol)
+                        val alert = resolve(LiveReadingLanes.resolved(display.primaryValue), history, viewMode, isMmol,
+                            preferIncomingSample = false)
                         assertEquals(calibrated, alert.primaryValue, 0.001f)
                         assertTrue(isLow(stock, isMmol, scale))
                         assertFalse(isLow(alert.primaryValue, isMmol, scale))
@@ -52,11 +53,44 @@ class OttaiLiveCalibrationTests {
         }
     }
 
+    @Test
+    fun pendingHistoryWriteDoesNotDelayLowOrHighTransition() {
+        for (isMmol in listOf(true, false)) {
+            val scale = if (isMmol) 1f else 18.0182f
+            withCalibration(1.4f * scale) {
+                for (viewMode in listOf(0, 2)) {
+                    for ((stockMmol, type) in listOf(2.3f to AlertType.LOW, 8.3f to AlertType.HIGH)) {
+                        // The previous minute is in range; only the incoming sample crosses
+                        // the threshold after calibration. Room has not stored it yet.
+                        val history = listOf(GlucosePoint(TIME - 60_000L, 3.7f * scale, 0f))
+                        val display = resolve(LiveReadingLanes.stock(stockMmol * scale, Float.NaN), history, viewMode, isMmol)
+                        assertEquals((stockMmol + 1.4f) * scale, display.primaryValue, 0.001f)
+                        assertEquals(TIME, display.timeMillis)
+                        val alert = resolve(LiveReadingLanes.resolved(display.primaryValue), history, viewMode, isMmol,
+                            preferIncomingSample = false)
+                        assertEquals(display.primaryValue, alert.primaryValue, 0.001f)
+                        val active = StandardGlucoseAlertEvaluator.resolveActive(
+                            glucoseValue = alert.primaryValue,
+                            rate = 0f,
+                            configs = mapOf(type to AlertConfig(type, enabled = true,
+                                threshold = (if (type == AlertType.LOW) 3.9f else 9.0f) * scale)),
+                            alertTypes = listOf(type),
+                            isMmol = isMmol,
+                            isConfigActive = { true },
+                        )
+                        assertTrue("missed $type transition in view $viewMode", type in active)
+                    }
+                }
+            }
+        }
+    }
+
     private fun resolve(
         reading: LiveReadingLanes,
         history: List<GlucosePoint>,
         viewMode: Int,
         isMmol: Boolean,
+        preferIncomingSample: Boolean = true,
     ) = requireNotNull(CurrentDisplaySource.resolveSnapshot(
         current = CurrentGlucoseSource.Snapshot.of(reading, TIME, "", 0f, SENSOR, 0, 0, "ottai-live"),
         recentPoints = history,
@@ -65,6 +99,7 @@ class OttaiLiveCalibrationTests {
         isMmol = isMmol,
         smoothingMode = CurrentDisplaySource.SmoothingMode(false, 0, false),
         sensorId = SENSOR,
+        preferIncomingSample = preferIncomingSample,
     ))
 
     private fun isLow(value: Float, isMmol: Boolean, scale: Float) = AlertType.LOW in

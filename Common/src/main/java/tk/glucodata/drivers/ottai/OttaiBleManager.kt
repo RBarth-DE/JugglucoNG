@@ -3617,6 +3617,7 @@ class OttaiBleManager(
             preferredSensorId = id,
             sensorGen = SENSOR_GEN,
             source = "ottai-live",
+            preferIncomingSample = true,
         ) ?: return
         markLocalReadingAccepted(reading.sampleMs)
         SuperGattCallback.processExternalCurrentReading(id, display.primaryValue, display.rate, reading.sampleMs, SENSOR_GEN)
