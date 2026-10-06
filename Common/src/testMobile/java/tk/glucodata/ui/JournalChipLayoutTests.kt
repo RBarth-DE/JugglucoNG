@@ -21,7 +21,7 @@ class JournalChipLayoutTests {
             gapPx = 4f,
             ringStepPx = 4f,
             maxRadiusPx = 200f
-        )
+        ).shifts
 
     private fun moved(boxes: List<JournalChipBox>, members: IntArray, shifts: Array<FloatArray>): List<JournalChipBox> {
         val result = boxes.toMutableList()
@@ -298,5 +298,16 @@ class JournalChipLayoutTests {
         val piles = JournalChipLayout.piles(placements, 12f, 8f)
 
         assertEquals(listOf(listOf(0, 1)), piles.map { it.toList() })
+    }
+
+    @Test
+    fun aMemberWithNowhereToGoIsMarkedStuck() {
+        // The chart is exactly one chip tall and wide, so the chip behind has nowhere to go.
+        val boxes = listOf(box(0f, 8f), box(2f, 8f))
+
+        val spread = JournalChipLayout.spread(boxes, intArrayOf(0, 1), 0f, 102f, 8f, 8f, 4f, 4f, 200f)
+
+        assertEquals(listOf(false, true), spread.stuck.toList())
+        assertEquals(1, spread.stuckCount)
     }
 }

@@ -1710,6 +1710,23 @@ fun InteractiveGlucoseChart(
         suppressDoubleTapUntil = now + 450L
     }
 
+    // Zooms in on a stretch of time, for a pile of journal chips too crowded to spread apart at
+    // the current zoom: closer in, its chips have room.
+    fun zoomChartOnto(startMillis: Long, endMillis: Long) {
+        val duration = ((endMillis - startMillis) * 3L)
+            .coerceIn(minDuration, (visibleDuration / 2L).coerceAtLeast(minDuration))
+        val center = ((startMillis + endMillis) / 2L).coerceAtMost(maxAllowedCenterTime(duration))
+        preZoomDuration = 0L
+        visibleDuration = duration
+        centerTime = center
+        previewCenterTime = previewCenterTimeContainingViewport(
+            previewCenterTime = previewCenterTime,
+            viewportCenterTime = center,
+            visibleDuration = duration
+        )
+        markProgrammaticViewportChange()
+    }
+
     // --- DATA CAPTURE FOR GESTURES ---
     // Use rememberUpdatedState to ensure the running gesture coroutine always sees the latest data
     val currentSafeData by rememberUpdatedState(safeData)
@@ -3545,19 +3562,25 @@ fun InteractiveGlucoseChart(
                 // A pixel of slack so a chip laid out at its measured width never ellipsizes.
                 journalChipChromePx + journalChipTextWidth(label).coerceAtMost(journalChipMaxTextPx) + 1f
             }
-            // Entries of one kind closer together than a few dp can't be told apart on screen, as
-            // with a loop's doses on a wide zoom; the later ones fold behind the first instead of
-            // each claiming a spot. The steps are fixed in time, so panning never regroups them.
+            // Entries showing the same thing closer together than a few dp can't be told apart on
+            // screen, as with a loop's equal doses on a wide zoom; the later ones fold behind the
+            // first instead of each claiming a spot. A different value never folds, so every
+            // dose stays readable. The steps are fixed in time, so panning never regroups them,
+            // except that an entry still on screen never folds into one that has left it.
             val journalChipFoldMillis = (with(LocalDensity.current) { 4.dp.toPx() } * journalChipLayoutZoom / overlayDataWidthPx.coerceAtLeast(1f))
                 .toLong()
                 .coerceAtLeast(1L)
             val chipFoldInto = arrayOfNulls<Int>(chipMarkers.size)
             run {
-                val firstInStep = HashMap<Pair<JournalEntryType, Long>, Int>()
+                val firstInStep = HashMap<Triple<JournalEntryType, String, Long>, Int>()
                 chipMarkers.forEachIndexed { index, marker ->
-                    val step = marker.type to Math.floorDiv(marker.timestamp, journalChipFoldMillis)
-                    val first = firstInStep.putIfAbsent(step, index)
-                    if (first != null) chipFoldInto[index] = first
+                    val step = Triple(marker.type, chipLabels[index], Math.floorDiv(marker.timestamp, journalChipFoldMillis))
+                    val first = firstInStep[step]
+                    if (first == null || (chipAnchorXs[first] < 0f && chipAnchorXs[index] >= 0f)) {
+                        firstInStep[step] = index
+                    } else {
+                        chipFoldInto[index] = first
+                    }
                 }
             }
             val chipPlacements = JournalChipLayout.place(
@@ -3614,21 +3637,42 @@ fun InteractiveGlucoseChart(
             }
             // A hovered pile opens even while another is open from a tap; leaving it falls back
             // to the tapped one.
-            val openChipGroup = (hoverOpenJournalChipId?.let(chipGroupOf::get) ?: expandedJournalChipId?.let(chipGroupOf::get))
-            val chipSpreads = Array(chipMarkers.size) { Offset.Zero }
-            if (openChipGroup != null) {
-                val spread = JournalChipLayout.spread(
-                    boxes = chipBoxes,
-                    members = openChipGroup,
-                    minX = 0f,
-                    maxX = overlayDataWidthPx,
-                    minTop = journalChipLayoutSpec.minTop,
-                    maxTop = journalChipLayoutSpec.maxTop,
-                    gapPx = journalChipGapPx,
-                    ringStepPx = journalChipGapPx,
-                    maxRadiusPx = with(LocalDensity.current) { 160.dp.toPx() }
+            val openChipPile = (hoverOpenJournalChipId?.let(chipGroupOf::get) ?: expandedJournalChipId?.let(chipGroupOf::get))
+            // Only the top of a huge pile spreads; the rest stay counted on its front.
+            val journalChipMaxSpread = 24
+            fun spreadablePart(group: IntArray) = if (group.size > journalChipMaxSpread) group.copyOf(journalChipMaxSpread) else group
+            val openChipGroup = openChipPile?.let(::spreadablePart)
+            val journalChipSpreadRadiusPx = with(LocalDensity.current) { 160.dp.toPx() }
+            fun spreadOf(group: IntArray) = JournalChipLayout.spread(
+                boxes = chipBoxes,
+                members = spreadablePart(group),
+                minX = 0f,
+                maxX = overlayDataWidthPx,
+                minTop = journalChipLayoutSpec.minTop,
+                maxTop = journalChipLayoutSpec.maxTop,
+                gapPx = journalChipGapPx,
+                ringStepPx = journalChipGapPx,
+                maxRadiusPx = journalChipSpreadRadiusPx
+            )
+            // A pile too crowded to spread out here zooms in on its entries instead, while the
+            // chart can still zoom; there they have room.
+            val canZoomOntoChips = visibleDuration > minDuration
+            fun zoomOntoPile(group: IntArray) {
+                zoomChartOnto(
+                    group.minOf { chipMarkers[it].timestamp },
+                    group.maxOf { chipMarkers[it].timestamp }
                 )
-                openChipGroup.forEachIndexed { slot, index -> chipSpreads[index] = Offset(spread[slot][0], spread[slot][1]) }
+            }
+            val chipSpreads = Array(chipMarkers.size) { Offset.Zero }
+            // How many chips of the open pile found no clear spot, or were past the top of it,
+            // so its front still counts them.
+            var openChipGroupStuck = 0
+            if (openChipPile != null && openChipGroup != null) {
+                val spread = spreadOf(openChipPile)
+                openChipGroupStuck = spread.stuckCount + (openChipPile.size - openChipGroup.size)
+                openChipGroup.forEachIndexed { slot, index ->
+                    chipSpreads[index] = Offset(spread.shifts[slot][0], spread.shifts[slot][1])
+                }
             }
 
             // Every chip rides one spring, in the chart's own frame: x relative to its entry, so
@@ -3707,8 +3751,15 @@ fun InteractiveGlucoseChart(
                 val group = chipGroupOf[marker.entryId]
                 val placement = chipPlacements[index]
                 // The front of a closed pile counts the chips it hides, itself included; those
-                // it hides are left to it for screen readers until the pile opens.
-                val stackCount = if (group != null && group[0] == index && !inOpenGroup) group.size else 0
+                // it hides are left to it for screen readers until the pile opens. Open, it
+                // still counts any that found no room to spread into.
+                val isPileFront = group != null && group[0] == index
+                val stackCount = when {
+                    !isPileFront -> 0
+                    !inOpenGroup -> group!!.size
+                    openChipGroupStuck > 0 -> openChipGroupStuck + 1
+                    else -> 0
+                }
                 val hiddenInPile = group != null && group[0] != index && !inOpenGroup
                 val widthPx = chipWidths[index]
                 val touchInsetX = ((journalChipTouchPx - widthPx) / 2f).coerceAtLeast(0f)
@@ -3750,7 +3801,15 @@ fun InteractiveGlucoseChart(
                             }
                         },
                         onClick = {
-                            if (group != null && !inOpenGroup) {
+                            val stuck = when {
+                                group == null -> 0
+                                inOpenGroup -> openChipGroupStuck
+                                else -> spreadOf(group).stuckCount + (group.size - spreadablePart(group).size)
+                            }
+                            if (group != null && stuck > 0 && canZoomOntoChips && (!inOpenGroup || isPileFront)) {
+                                expandedJournalChipId = marker.entryId
+                                zoomOntoPile(group)
+                            } else if (group != null && !inOpenGroup) {
                                 expandedJournalChipId = marker.entryId
                             } else {
                                 expandedJournalChipId = null

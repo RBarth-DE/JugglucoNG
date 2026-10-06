@@ -25,6 +25,11 @@ internal data class JournalChipRequest(
     val foldInto: Int? = null
 )
 
+/** How far each member of an opened pile moves, as `dx` and `dy` pairs, and which found no clear spot. */
+internal class JournalChipSpread(val shifts: Array<FloatArray>, val stuck: BooleanArray) {
+    val stuckCount: Int get() = stuck.count { it }
+}
+
 /**
  * The spot a chip was given. [front] is the chip it sits behind, or its own index when nothing
  * covers it; [depth] is how many layers down it sits, 0 being on top. [crowded] chips overlap
@@ -124,7 +129,11 @@ internal object JournalChipLayout {
         val displaced = requests.indices.filter { it !in folded && layout.placements[it] == null && requests[it].previous != null }
         val fresh = requests.indices.filter { it !in folded && requests[it].previous == null }
         val order = displaced.sortedBy { layout.repeats[it] } + fresh.sortedBy { layout.repeats[it] }
+        // Once the chart is this full, so many chips have nowhere free that a full search for
+        // each would stall panning; later ones only look close by, and overlap where they are.
+        var crowdedCount = 0
         order.forEach { index ->
+            val saturated = crowdedCount >= CROWDED_SEARCH_BUDGET
             val request = requests[index]
             var bestSlot: JournalChipSlot? = null
             var bestBox: JournalChipBox? = null
@@ -147,8 +156,9 @@ internal object JournalChipLayout {
             request.previous?.let(::consider)
             // Then the rest, nearest first. Going off screen or tucking only adds cost, so once
             // a spot's base cost alone is no better than the best found, nothing further can be.
-            for ((slot, baseCost) in slots) {
-                if (baseCost >= bestCost) break
+            for ((position, entry) in slots.withIndex()) {
+                val (slot, baseCost) = entry
+                if (baseCost >= bestCost || (saturated && position >= SATURATED_CANDIDATES)) break
                 if (slot != request.previous) consider(slot)
             }
             val slot = bestSlot
@@ -156,7 +166,8 @@ internal object JournalChipLayout {
             if (slot != null && box != null) {
                 layout.commit(index, slot, box, bestPile)
             } else {
-                crowdedPlacement(index, request, slots, spec, layout)
+                crowdedPlacement(index, request, slots, spec, layout, search = !saturated)
+                crowdedCount++
             }
         }
         // A folded chip hides wholly behind the chip it folds into, one layer under that pile.
@@ -250,14 +261,16 @@ internal object JournalChipLayout {
 
     // With no open spot, the chip overlaps: of the nearest spots, and last frame's, it takes
     // the one that hides the least, cost included. Last frame's spot is favoured strongly, so
-    // a crowded chip holds still while panning instead of hopping between equal overlaps. It
-    // goes behind what it overlaps, joining the pile of the chip it covers most.
+    // a crowded chip holds still while panning instead of hopping between equal overlaps.
+    // Without [search], it just keeps last frame's spot, or its own. It goes behind what it
+    // overlaps, joining the pile of the chip it covers most.
     private fun crowdedPlacement(
         index: Int,
         request: JournalChipRequest,
         slots: List<Pair<JournalChipSlot, Float>>,
         spec: Spec,
-        layout: Layout
+        layout: Layout,
+        search: Boolean = true
     ) {
         var chosenSlot: JournalChipSlot? = null
         var chosenBox: JournalChipBox? = null
@@ -272,10 +285,15 @@ internal object JournalChipLayout {
                 chosenCost = cost
             }
         }
-        request.previous?.let { consider(it, CROWDED_KEEP_BONUS) }
+        if (!search) {
+            chosenSlot = request.previous?.takeIf { boxFor(request, it, spec) != null }
+            chosenBox = chosenSlot?.let { boxFor(request, it, spec) }
+        } else {
+            request.previous?.let { consider(it, CROWDED_KEEP_BONUS) }
+        }
         var tried = 0
         for ((slot, _) in slots) {
-            if (tried >= CROWDED_CANDIDATES) break
+            if (!search || tried >= CROWDED_CANDIDATES) break
             if (boxFor(request, slot, spec) == null) continue
             tried++
             consider(slot, 0f)
@@ -306,6 +324,8 @@ internal object JournalChipLayout {
     }
 
     private const val CROWDED_CANDIDATES = 24
+    private const val CROWDED_SEARCH_BUDGET = 32
+    private const val SATURATED_CANDIDATES = 12
     private const val CROWDED_KEEP_BONUS = 2f
 
     // Every spot a chip may take, with its base cost, cheapest first.
@@ -446,8 +466,9 @@ internal object JournalChipLayout {
      * makes nothing worse. Otherwise it tries rings of candidate spots around its own position,
      * nearest first, [ringStepPx] apart out to [maxRadiusPx], and takes the first that keeps
      * [gapPx] from every chip already placed and every chip outside the group, and stays inside
-     * [minX]..[maxX] × [minTop]..[maxTop]. A chip with no such spot in reach stays where it is.
-     * The result lines up with [members], as `dx` and `dy` pairs.
+     * [minX]..[maxX] × [minTop]..[maxTop]. A chip with no such spot in reach stays where it is
+     * and is marked stuck, so the chart can say so and offer a closer zoom. The result lines up
+     * with [members].
      */
     fun spread(
         boxes: List<JournalChipBox>,
@@ -459,8 +480,9 @@ internal object JournalChipLayout {
         gapPx: Float,
         ringStepPx: Float,
         maxRadiusPx: Float
-    ): Array<FloatArray> {
+    ): JournalChipSpread {
         val shifts = Array(members.size) { FloatArray(2) }
+        val stuck = BooleanArray(members.size)
         val memberSet = members.toHashSet()
         val placed = ArrayList<JournalChipBox>(boxes.size)
         boxes.indices.filter { it !in memberSet }.mapTo(placed) { boxes[it] }
@@ -489,14 +511,16 @@ internal object JournalChipLayout {
                         left < other.right + gapPx && other.left < left + width + gapPx &&
                             top < other.bottom + gapPx && other.top < top + height + gapPx
                     }
-            } ?: (0f to 0f)
-            shifts[slot][0] = spot.first
-            shifts[slot][1] = spot.second
-            val moved = JournalChipBox(box.left + spot.first, box.top + spot.second, box.right + spot.first, box.bottom + spot.second)
+            }
+            if (spot == null) stuck[slot] = true
+            val (dx, dy) = spot ?: (0f to 0f)
+            shifts[slot][0] = dx
+            shifts[slot][1] = dy
+            val moved = JournalChipBox(box.left + dx, box.top + dy, box.right + dx, box.bottom + dy)
             placedMembers.add(moved)
             placed.add(moved)
         }
-        return shifts
+        return JournalChipSpread(shifts, stuck)
     }
 
     private const val RING_DIRECTIONS = 24
