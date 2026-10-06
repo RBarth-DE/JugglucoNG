@@ -817,10 +817,9 @@ private fun isLibreSensorId(sensorId: String): Boolean {
             SensorSourceResolver.SENSOR_KIND_UNKNOWN
         )
     }.getOrDefault(SensorSourceResolver.SENSOR_KIND_UNKNOWN)
-    if (kind == SensorSourceResolver.SENSOR_KIND_LIBRE2 ||
-        kind == SensorSourceResolver.SENSOR_KIND_LIBRE3
-    ) {
-        return true
+    if (kind != SensorSourceResolver.SENSOR_KIND_UNKNOWN) {
+        // Includes the managed families, which native alone calls Libre 2 by elimination.
+        return SensorSourceResolver.isLibreKind(kind)
     }
     val sensorPtr = runCatching { Natives.str2sensorptr(sensorId) }.getOrDefault(0L)
     if (sensorPtr != 0L) {

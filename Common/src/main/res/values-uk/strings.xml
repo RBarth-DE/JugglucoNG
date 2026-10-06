@@ -1014,6 +1014,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="wipe_data">Wipe sensor data</string>
     <string name="writedown">Write down!</string>
     <string name="xdrip_compatible_desc">AAPS</string>
+    <string name="xdrip_report_as_libre2_title">Ідентифікувати як Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Дозволяє AAPS увімкнути SMB always з цим датчиком. Вмикайте, лише якщо довіряєте його показам</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Надсилати показники глюкози в Health Connect для сумісних застосунків здоров\'я</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
