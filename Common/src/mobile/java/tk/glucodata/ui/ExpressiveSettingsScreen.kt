@@ -1826,6 +1826,7 @@ private fun LanguagePickerDialog(onDismiss: () -> Unit) {
         "Chinese" to "zh",
         "German" to "de",
         "French" to "fr",
+        "Hungarian" to "hu",
         "Italian" to "it",
         "Dutch" to "nl",
         "Polish" to "pl",
