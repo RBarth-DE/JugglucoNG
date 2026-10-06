@@ -310,4 +310,27 @@ class JournalChipLayoutTests {
         assertEquals(listOf(false, true), spread.stuck.toList())
         assertEquals(1, spread.stuckCount)
     }
+
+    @Test
+    fun onAFullChartALaterChipStillFindsFreeRoom() {
+        // Forty chips crowd one spot, well past the point where overlaps stop being weighed;
+        // a chip far from them still gets its own free spot.
+        val tight = spec.copy(minTop = 190f, maxTop = 210f)
+        val crowd = (0 until 40).map { request(10f) }
+
+        val placements = JournalChipLayout.place(crowd + request(300f, width = 60f), tight)
+
+        val last = placements.last()
+        assertTrue(!last.crowded)
+        assertTrue(placements.dropLast(1).none { overlapping(it.box, last.box) })
+    }
+
+    @Test
+    fun onAFullChartCrowdedChipsStayOnTheChart() {
+        val tight = spec.copy(minTop = 190f, maxTop = 210f)
+
+        val placements = JournalChipLayout.place((0 until 60).map { request(380f) }, tight)
+
+        assertTrue(placements.all { it.box.left >= 0f && it.box.right <= 400f })
+    }
 }

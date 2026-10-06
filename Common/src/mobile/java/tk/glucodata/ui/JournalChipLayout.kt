@@ -129,8 +129,9 @@ internal object JournalChipLayout {
         val displaced = requests.indices.filter { it !in folded && layout.placements[it] == null && requests[it].previous != null }
         val fresh = requests.indices.filter { it !in folded && requests[it].previous == null }
         val order = displaced.sortedBy { layout.repeats[it] } + fresh.sortedBy { layout.repeats[it] }
-        // Once the chart is this full, so many chips have nowhere free that a full search for
-        // each would stall panning; later ones only look close by, and overlap where they are.
+        // Once the chart is this full, so many chips have nowhere free that weighing every
+        // overlap for each would stall panning; later ones still take any free spot there is,
+        // but with none, overlap at the nearest spot on the chart without weighing how much.
         var crowdedCount = 0
         order.forEach { index ->
             val saturated = crowdedCount >= CROWDED_SEARCH_BUDGET
@@ -141,6 +142,7 @@ internal object JournalChipLayout {
             var bestCost = Float.POSITIVE_INFINITY
             fun consider(slot: JournalChipSlot) {
                 val box = boxFor(request, slot, spec) ?: return
+                if (leavesChart(request, box, spec)) return
                 var cost = costOf(request, slot, box, spec)
                 if (cost >= bestCost) return
                 val pile = layout.fitOf(index, box) ?: return
@@ -156,9 +158,8 @@ internal object JournalChipLayout {
             request.previous?.let(::consider)
             // Then the rest, nearest first. Going off screen or tucking only adds cost, so once
             // a spot's base cost alone is no better than the best found, nothing further can be.
-            for ((position, entry) in slots.withIndex()) {
-                val (slot, baseCost) = entry
-                if (baseCost >= bestCost || (saturated && position >= SATURATED_CANDIDATES)) break
+            for ((slot, baseCost) in slots) {
+                if (baseCost >= bestCost) break
                 if (slot != request.previous) consider(slot)
             }
             val slot = bestSlot
@@ -166,7 +167,7 @@ internal object JournalChipLayout {
             if (slot != null && box != null) {
                 layout.commit(index, slot, box, bestPile)
             } else {
-                crowdedPlacement(index, request, slots, spec, layout, search = !saturated)
+                crowdedPlacement(index, request, slots, spec, layout, weighOverlap = !saturated)
                 crowdedCount++
             }
         }
@@ -262,44 +263,51 @@ internal object JournalChipLayout {
     // With no open spot, the chip overlaps: of the nearest spots, and last frame's, it takes
     // the one that hides the least, cost included. Last frame's spot is favoured strongly, so
     // a crowded chip holds still while panning instead of hopping between equal overlaps.
-    // Without [search], it just keeps last frame's spot, or its own. It goes behind what it
-    // overlaps, joining the pile of the chip it covers most.
+    // Without [weighOverlap], it takes the cheapest of those spots by cost alone, which still
+    // keeps it on the chart. It goes behind what it overlaps, joining the pile of the chip it
+    // covers most.
     private fun crowdedPlacement(
         index: Int,
         request: JournalChipRequest,
         slots: List<Pair<JournalChipSlot, Float>>,
         spec: Spec,
         layout: Layout,
-        search: Boolean = true
+        weighOverlap: Boolean = true
     ) {
         var chosenSlot: JournalChipSlot? = null
         var chosenBox: JournalChipBox? = null
         var chosenCost = Float.POSITIVE_INFINITY
         fun consider(slot: JournalChipSlot, bonus: Float) {
             val box = boxFor(request, slot, spec) ?: return
-            val cost = costOf(request, slot, box, spec) - bonus +
-                layout.grid.overlapArea(box, spec.gap) / (spec.chipHeight * spec.rowStep)
+            if (leavesChart(request, box, spec)) return
+            var cost = costOf(request, slot, box, spec) - bonus
+            if (cost >= chosenCost) return
+            if (weighOverlap) {
+                // Capped at the chip's own area: once a spot is wholly covered, more layers
+                // under it hide nothing more, and must not outweigh hanging off the chart.
+                val ownArea = (box.right - box.left + 2f * spec.gap) * (box.bottom - box.top + 2f * spec.gap)
+                cost += minOf(layout.grid.overlapArea(box, spec.gap), ownArea) / (spec.chipHeight * spec.rowStep)
+            }
             if (cost < chosenCost) {
                 chosenSlot = slot
                 chosenBox = box
                 chosenCost = cost
             }
         }
-        if (!search) {
-            chosenSlot = request.previous?.takeIf { boxFor(request, it, spec) != null }
-            chosenBox = chosenSlot?.let { boxFor(request, it, spec) }
-        } else {
-            request.previous?.let { consider(it, CROWDED_KEEP_BONUS) }
-        }
+        request.previous?.let { consider(it, CROWDED_KEEP_BONUS) }
         var tried = 0
         for ((slot, _) in slots) {
-            if (!search || tried >= CROWDED_CANDIDATES) break
+            if (tried >= CROWDED_CANDIDATES) break
             if (boxFor(request, slot, spec) == null) continue
             tried++
             consider(slot, 0f)
         }
-        val slot = chosenSlot ?: JournalChipSlot.Preferred
-        val box = chosenBox ?: boxFor(request, JournalChipSlot.Preferred, spec, clamp = true)!!
+        // With nothing in reach on the chart, the chip hangs on whichever side of its entry
+        // leaves the chart least.
+        val fallback = chosenSlot ?: listOf(JournalChipSlot.Preferred, JournalChipSlot(side = -1, lift = 0, nudge = 0))
+            .minBy { offScreenOf(request, boxFor(request, it, spec, clamp = true)!!, spec) }
+        val slot = fallback
+        val box = chosenBox ?: boxFor(request, fallback, spec, clamp = true)!!
         var covered = OBSTACLE
         var coveredArea = 0f
         var depth = 0
@@ -325,7 +333,6 @@ internal object JournalChipLayout {
 
     private const val CROWDED_CANDIDATES = 24
     private const val CROWDED_SEARCH_BUDGET = 32
-    private const val SATURATED_CANDIDATES = 12
     private const val CROWDED_KEEP_BONUS = 2f
 
     // Every spot a chip may take, with its base cost, cheapest first.
@@ -370,6 +377,11 @@ internal object JournalChipLayout {
         if (slot == request.previous) cost -= KEEP_DISCOUNT
         return cost
     }
+
+    // A chip whose entry is on screen stays wholly on the chart; one whose entry has left, or
+    // has yet to arrive, may hang off with it.
+    private fun leavesChart(request: JournalChipRequest, box: JournalChipBox, spec: Spec): Boolean =
+        request.anchorX >= spec.minX && request.anchorX <= spec.maxX && offScreenOf(request, box, spec) > 0f
 
     // How far a chip hangs off the screen, as far as it matters. Past the right edge always
     // counts, so a chip scrolling in from the right arrives already hung to the left of its
