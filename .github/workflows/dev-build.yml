@@ -187,6 +187,8 @@ jobs:
       contents: read
       actions: read
       issues: write
+      # Timeline comments on PRs also need this scope for the Actions App token.
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
