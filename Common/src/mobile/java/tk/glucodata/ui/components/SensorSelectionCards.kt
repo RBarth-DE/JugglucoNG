@@ -84,6 +84,7 @@ fun SensorSelectionCards(
                 SensorCard(
                     icon = option.icon,
                     title = stringResource(option.titleRes),
+                    subtitle = stringResource(option.subtitleRes),
                     containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
                     onClick = { onSensorSelected(option.type) },
@@ -102,6 +103,7 @@ fun SensorSelectionCards(
 private fun SensorCard(
     icon: ImageVector,
     title: String,
+    subtitle: String,
     containerColor: androidx.compose.ui.graphics.Color,
     contentColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
@@ -149,6 +151,14 @@ private fun SensorCard(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             

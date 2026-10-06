@@ -37,20 +37,21 @@ enum class SensorType {
 internal data class SensorTypeOption(
     val type: SensorType,
     val icon: ImageVector,
-    val titleRes: Int
+    val titleRes: Int,
+    val subtitleRes: Int
 )
 
 internal val sensorTypeOptions = listOf(
-    SensorTypeOption(SensorType.LIBRE, Icons.Default.Nfc, R.string.libre_sensor),
-    SensorTypeOption(SensorType.SIBIONICS, Icons.Default.QrCodeScanner, R.string.sibionics_sensor),
-    SensorTypeOption(SensorType.DEXCOM, Icons.Default.QrCodeScanner, R.string.dexcom_sensor),
-    SensorTypeOption(SensorType.AIDEX, Icons.Default.Bluetooth, R.string.aidex_sensor),
-    SensorTypeOption(SensorType.ICANHEALTH, Icons.Default.Bluetooth, R.string.icanhealth_sensor),
-    SensorTypeOption(SensorType.ANYTIME, Icons.Default.Bluetooth, R.string.anytime_sensor),
-    SensorTypeOption(SensorType.MQ, Icons.Default.Bluetooth, R.string.mq_sensor),
-    SensorTypeOption(SensorType.OTTAI, Icons.Default.Bluetooth, R.string.ottai_sensor),
-    SensorTypeOption(SensorType.ACCUCHEK, Icons.Default.QrCodeScanner, R.string.accuchek_sensor),
-    SensorTypeOption(SensorType.CARESENS_AIR, Icons.Default.QrCodeScanner, R.string.caresens_air_sensor),
+    SensorTypeOption(SensorType.LIBRE, Icons.Default.Nfc, R.string.libre_sensor, R.string.libre_sensor_desc),
+    SensorTypeOption(SensorType.DEXCOM, Icons.Default.QrCodeScanner, R.string.dexcom_sensor, R.string.dexcom_sensor_desc),
+    SensorTypeOption(SensorType.SIBIONICS, Icons.Default.QrCodeScanner, R.string.sibionics_sensor, R.string.sibionics_sensor_desc),
+    SensorTypeOption(SensorType.AIDEX, Icons.Default.Bluetooth, R.string.aidex_sensor, R.string.aidex_sensor_desc),
+    SensorTypeOption(SensorType.OTTAI, Icons.Default.Bluetooth, R.string.ottai_sensor, R.string.ottai_sensor_desc),
+    SensorTypeOption(SensorType.ICANHEALTH, Icons.Default.Bluetooth, R.string.icanhealth_sensor, R.string.icanhealth_sensor_desc),
+    SensorTypeOption(SensorType.ANYTIME, Icons.Default.Bluetooth, R.string.anytime_sensor, R.string.anytime_sensor_desc),
+    SensorTypeOption(SensorType.ACCUCHEK, Icons.Default.QrCodeScanner, R.string.accuchek_sensor, R.string.accuchek_sensor_desc),
+    SensorTypeOption(SensorType.CARESENS_AIR, Icons.Default.QrCodeScanner, R.string.caresens_air_sensor, R.string.caresens_air_sensor_desc),
+    SensorTypeOption(SensorType.MQ, Icons.Default.Bluetooth, R.string.mq_sensor, R.string.mq_sensor_desc),
 )
 
 /**
@@ -104,6 +105,7 @@ fun SensorTypePicker(
                 SensorTypeItem(
                     icon = entry.icon,
                     title = stringResource(entry.titleRes),
+                    subtitle = stringResource(entry.subtitleRes),
                     onClick = {
                         onSensorSelected(entry.type)
                         onDismiss()
@@ -123,6 +125,7 @@ fun SensorTypePicker(
 private fun SensorTypeItem(
     icon: ImageVector,
     title: String,
+    subtitle: String,
     onClick: () -> Unit,
     itemVerticalPadding: Dp = 12.dp,
     iconContainerSize: Dp = 48.dp,
@@ -167,6 +170,13 @@ private fun SensorTypeItem(
                     style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
