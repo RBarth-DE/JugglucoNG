@@ -28,8 +28,8 @@ class LiveCalibrationPolicyTests {
     fun aidexLeavesGenericCalibrationToTheApp() {
         // Default false is what makes handleGlucoseResult apply getCalibratedValue.
         // AiDEX does not override the flag, so its direct live path stays on that gate.
-        // Ottai is not part of this: its live value is published as resolved formula
-        // glucose and never reaches integratesUserCalibration.
+        // Ottai resolves its stock formula glucose through CurrentDisplaySource
+        // before using the external resolved-value API.
         val contract = source("Common/src/main/java/tk/glucodata/drivers/ManagedBluetoothSensorDriver.kt")
         assertTrue(
             contract.contains("fun integratesUserCalibration(isRawMode: Boolean): Boolean = false"),
@@ -49,14 +49,15 @@ class LiveCalibrationPolicyTests {
     }
 
     @Test
-    fun ottaiPublishesCurrentThroughTheResolvedExternalPath() {
-        // displayValue is formula glucose in display units, not a user calibration.
-        // processExternalCurrentReading marks it resolved, so the display does not
-        // calibrate it. handleGlucoseResult would apply getCalibratedValue once,
-        // the first time, because Ottai does not fold calibration in. This must stay
-        // the only publish of that sample: both paths would publish it twice.
+    fun ottaiResolvesUserCalibrationBeforePublishingCurrent() {
         val ottai = source("Common/src/main/java/tk/glucodata/drivers/ottai/OttaiBleManager.kt")
-        assertTrue(ottai.contains("processExternalCurrentReading(id, reading.displayValue"))
+        val publish = ottai.substringAfter("private fun publishCurrentReading(")
+            .substringBefore("private fun resolveSampleTimeMs(")
+        assertTrue(publish.contains("CurrentDisplaySource.resolveIncomingReading("))
+        assertTrue(publish.contains("LiveReadingLanes.stock(reading.displayValue, Float.NaN)"))
+        assertTrue(publish.contains("preferredSensorId = id"))
+        assertTrue(publish.contains("processExternalCurrentReading(id, display.primaryValue, display.rate"))
+        assertFalse(publish.contains("processExternalCurrentReading(id, reading.displayValue"))
         assertFalse(ottai.contains("handleGlucoseResult("))
     }
 
