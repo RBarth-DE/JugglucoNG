@@ -34,6 +34,17 @@ public class SensorSourceResolverTests {
         assertEquals("Anytime", SensorSourceResolver.xdripSourceInfoForKind(SensorSourceResolver.SENSOR_KIND_ANYTIME, false));
         assertEquals("MQ", SensorSourceResolver.xdripSourceInfoForKind(SensorSourceResolver.SENSOR_KIND_MQ, false));
         assertEquals("Nightscout", SensorSourceResolver.xdripSourceInfoForKind(SensorSourceResolver.SENSOR_KIND_NIGHTSCOUT, false));
+        // The API source relays another app's readings; it must not default to Libre 2.
+        assertEquals("Unknown", SensorSourceResolver.xdripSourceInfoForKind(SensorSourceResolver.SENSOR_KIND_EXTERNAL, false));
+        assertEquals("Libre2", SensorSourceResolver.xdripSourceInfoForKind(SensorSourceResolver.SENSOR_KIND_EXTERNAL, true));
+    }
+
+    @Test
+    public void genericFamilyHasNoKindOfItsOwn() {
+        assertEquals(SensorSourceResolver.SENSOR_KIND_UNKNOWN,
+                SensorSourceResolver.kindForManagedFamily(tk.glucodata.drivers.ManagedSensorUiFamily.GENERIC));
+        assertEquals(SensorSourceResolver.SENSOR_KIND_NIGHTSCOUT,
+                SensorSourceResolver.kindForManagedFamily(tk.glucodata.drivers.ManagedSensorUiFamily.NIGHTSCOUT));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package tk.glucodata;
 
+import tk.glucodata.drivers.ManagedSensorIdentityRegistry;
 import tk.glucodata.drivers.ManagedSensorUiFamily;
 
 public final class SensorSourceResolver {
@@ -20,6 +21,9 @@ public final class SensorSourceResolver {
     public static final int SENSOR_KIND_ANYTIME = MANAGED_KIND_BASE | 4;
     public static final int SENSOR_KIND_OTTAI = MANAGED_KIND_BASE | 5;
     public static final int SENSOR_KIND_NIGHTSCOUT = MANAGED_KIND_BASE | 7;
+    // A driver with no family of its own (the API source): readings another app
+    // pushed in, whose sensor this app cannot vouch for.
+    public static final int SENSOR_KIND_EXTERNAL = MANAGED_KIND_BASE;
 
     private SensorSourceResolver() {}
 
@@ -52,6 +56,7 @@ public final class SensorSourceResolver {
             case SENSOR_KIND_ANYTIME -> "Anytime";
             case SENSOR_KIND_MQ -> "MQ";
             case SENSOR_KIND_NIGHTSCOUT -> "Nightscout";
+            case SENSOR_KIND_EXTERNAL -> "Unknown";
             // Libre 2, and what is left once every flagged or stamped sensor has
             // been named: the Libre family by elimination, as upstream does it.
             // An unresolved reading comes from a Libre callback, whose sensorGen is
@@ -65,6 +70,10 @@ public final class SensorSourceResolver {
     }
 
     public static int resolveSensorKind(String sensorId, int fallbackSensorGen) {
+        final int driverKind = resolvePersistedDriverKind(sensorId);
+        if (driverKind != SENSOR_KIND_UNKNOWN) {
+            return driverKind;
+        }
         final int snapshotKind = resolveSnapshotSensorKind(sensorId);
         if (snapshotKind != SENSOR_KIND_UNKNOWN) {
             return snapshotKind;
@@ -74,6 +83,29 @@ public final class SensorSourceResolver {
 
     public static boolean isLibreKind(int sensorKind) {
         return sensorKind == SENSOR_KIND_LIBRE2 || sensorKind == SENSOR_KIND_LIBRE3;
+    }
+
+    /**
+     * The managed adapter that owns this sensor's persisted record knows what it
+     * is, stamped shell or not; a follower's mirror shell, for one, may predate
+     * its stamp. The stamp in the native record is what a Clone recipient, with
+     * no record of its own, goes by. Reads prefs only: this runs for every
+     * broadcast reading, so it must not take SensorBluetooth's locks.
+     */
+    private static int resolvePersistedDriverKind(String sensorId) {
+        if (sensorId == null || sensorId.isEmpty()) {
+            return SENSOR_KIND_UNKNOWN;
+        }
+        try {
+            final ManagedSensorUiFamily family = ManagedSensorIdentityRegistry.resolvePersistedFamily(sensorId);
+            if (family != null) {
+                final int kind = kindForManagedFamily(family);
+                return kind != SENSOR_KIND_UNKNOWN ? kind : SENSOR_KIND_EXTERNAL;
+            }
+        } catch (Throwable th) {
+            Log.stack("SensorSourceResolver", "resolvePersistedDriverKind", th);
+        }
+        return SENSOR_KIND_UNKNOWN;
     }
 
     private static int resolveSnapshotSensorKind(String sensorId) {
@@ -98,7 +130,12 @@ public final class SensorSourceResolver {
      * kind alone: shells written before the stamp existed carry no evidence.
      */
     static int kindForSnapshot(int nativeKind, int managedFamily) {
-        return switch (ManagedSensorUiFamily.Companion.fromNativeCode(managedFamily)) {
+        final int kind = kindForManagedFamily(ManagedSensorUiFamily.Companion.fromNativeCode(managedFamily));
+        return kind != SENSOR_KIND_UNKNOWN ? kind : nativeKind;
+    }
+
+    static int kindForManagedFamily(ManagedSensorUiFamily family) {
+        return switch (family) {
             case AIDEX -> SENSOR_KIND_AIDEX;
             case SIBIONICS -> SENSOR_KIND_SIBIONICS;
             case MQ -> SENSOR_KIND_MQ;
@@ -106,7 +143,7 @@ public final class SensorSourceResolver {
             case ANYTIME -> SENSOR_KIND_ANYTIME;
             case OTTAI -> SENSOR_KIND_OTTAI;
             case NIGHTSCOUT -> SENSOR_KIND_NIGHTSCOUT;
-            case GENERIC -> nativeKind;
+            case GENERIC -> SENSOR_KIND_UNKNOWN;
         };
     }
 

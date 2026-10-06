@@ -429,6 +429,7 @@ class NightscoutFollowerManager(
             logLabel = "Nightscout follower",
             mirrorToNative = true,
             source = GlucoseReadingSource.NIGHTSCOUT,
+            nativeFamily = ManagedSensorUiFamily.NIGHTSCOUT,
         )
         if (tailMs > 0L) {
             lastImportedHistoryTailMs = tailMs
@@ -454,6 +455,7 @@ class NightscoutFollowerManager(
             logLabel = "Nightscout follower",
             mirrorToNative = true,
             source = GlucoseReadingSource.NIGHTSCOUT,
+            nativeFamily = ManagedSensorUiFamily.NIGHTSCOUT,
         )
     }
 

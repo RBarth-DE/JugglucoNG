@@ -63,10 +63,19 @@ object VirtualGlucoseSensorBridge {
         sensorSerial: String,
         readings: List<Reading>,
         logLabel: String,
+        nativeFamily: ManagedSensorUiFamily,
     ): Int = synchronized(mirrorLock) {
-        runCatching { nativeMirror.mirror(sensorSerial, readings, logLabel) }
+        val stored = runCatching { nativeMirror.mirror(sensorSerial, readings, logLabel) }
             .onFailure { Log.stack(TAG, "mirrorIntoNative($sensorSerial)", it) }
             .getOrDefault(0)
+        // Stamp only once a shell exists: the stamp call would otherwise create one.
+        // Without it the mirror is Libre 2 by elimination to anything reading the
+        // native record, including the xDrip source name and a Clone recipient.
+        if (stored > 0 && nativeFamily != ManagedSensorUiFamily.GENERIC) {
+            runCatching { Natives.setSensorManagedFamily(sensorSerial, nativeFamily.nativeCode) }
+                .onFailure { Log.stack(TAG, "mirrorIntoNative(setSensorManagedFamily)", it) }
+        }
+        stored
     }
 
     data class Reading(
@@ -93,6 +102,7 @@ object VirtualGlucoseSensorBridge {
         nearDuplicateWindowMs: Long = 0L,
         mirrorToNative: Boolean = false,
         source: String = GlucoseReadingSource.SENSOR,
+        nativeFamily: ManagedSensorUiFamily = ManagedSensorUiFamily.GENERIC,
     ): Int {
         if (sensorSerial.isBlank() || readings.isEmpty()) return 0
         val nowMs = System.currentTimeMillis()
@@ -108,7 +118,7 @@ object VirtualGlucoseSensorBridge {
         // addressed by minute slot and idempotent, so re-offering the whole page
         // each poll is what refills a mirror that started out behind.
         if (mirrorToNative) {
-            mirrorIntoNative(sensorSerial, validReadings, logLabel)
+            mirrorIntoNative(sensorSerial, validReadings, logLabel, nativeFamily)
         }
         val latestRoomTimestamp = if (backfill) 0L else HistorySyncAccess.getLatestTimestampForSensor(sensorSerial)
         val existingTimestamps = if (nearDuplicateWindowMs > 0L) {
@@ -220,6 +230,7 @@ object VirtualGlucoseSensorBridge {
         logLabel: String = "virtual",
         mirrorToNative: Boolean = false,
         source: String = GlucoseReadingSource.SENSOR,
+        nativeFamily: ManagedSensorUiFamily = ManagedSensorUiFamily.GENERIC,
     ) {
         if (sensorSerial.isBlank()) return
         if (!isUsableCurrentReading(reading, System.currentTimeMillis())) {
@@ -238,7 +249,7 @@ object VirtualGlucoseSensorBridge {
             source,
         )
         if (mirrorToNative) {
-            mirrorIntoNative(sensorSerial, listOf(reading), logLabel)
+            mirrorIntoNative(sensorSerial, listOf(reading), logLabel, nativeFamily)
         }
 
         val primaryMgdl = reading.primaryGlucoseMgdl
