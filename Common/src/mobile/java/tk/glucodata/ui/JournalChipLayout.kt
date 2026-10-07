@@ -18,7 +18,8 @@ internal data class JournalChipTuck(val front: Int)
  * frame, either a [previous] spot of its own or a [previousTuck] in a pile. Chips with the same
  * [stackKey], such as a loop's repeated doses of one size, may tuck behind one another. A chip
  * with [foldInto] set is too close to that earlier chip to tell apart on screen, so it hides
- * wholly behind it rather than taking a spot of its own.
+ * wholly behind it rather than taking a spot of its own. Chips of different [kind]s, such as
+ * insulin and carbs, never pile together.
  */
 internal data class JournalChipRequest(
     val anchorX: Float,
@@ -27,7 +28,8 @@ internal data class JournalChipRequest(
     val previous: JournalChipSlot?,
     val stackKey: Any? = null,
     val foldInto: Int? = null,
-    val previousTuck: JournalChipTuck? = null
+    val previousTuck: JournalChipTuck? = null,
+    val kind: Any? = null
 )
 
 /** How far each member of an opened pile moves, as `dx` and `dy` pairs, and which found no clear spot. */
@@ -236,12 +238,14 @@ internal object JournalChipLayout {
 
         /**
          * Whether chip [index] may join the pile led by [front]: the front must lead its own
-         * pile. By choice, a repeat joins only a pile of its own value with room; a chip with no
-         * free spot at all, [crowded], may join any pile however full, so it is always counted.
+         * pile, of the same kind. By choice, a repeat joins only a pile of its own value with room;
+         * a chip with no free spot at all, [crowded], may join any pile of its kind however full,
+         * so it is always counted.
          */
         fun mayJoin(index: Int, front: Int, crowded: Boolean = false): Boolean {
             val lead = placements.getOrNull(front) ?: return false
             if (lead.front != front || lead.folded) return false
+            if (requests[index].kind != requests[front].kind) return false
             if (crowded) return true
             val key = requests[index].stackKey
             return key == null || key != requests[front].stackKey || pileSizes[front] < spec.maxStack
@@ -327,7 +331,10 @@ internal object JournalChipLayout {
                 tuck = JournalChipTuck(front)
             )
             pileSizes[front]++
-            grid.add(box, index)
+            // A chip wholly behind its front takes no room the front doesn't; leaving it out of
+            // the grid keeps dense columns short.
+            val lead = placements[front]!!.box
+            if (box.left < lead.left || box.right > lead.right) grid.add(box, index)
         }
     }
 
@@ -353,9 +360,10 @@ internal object JournalChipLayout {
     private fun within(a: JournalChipBox, b: JournalChipBox, gap: Float): Boolean =
         a.left - gap < b.right && b.left < a.right + gap && a.top - gap < b.bottom && b.top < a.bottom + gap
 
-    // With no free spot, the chip joins a pile: of the nearest spots, and last frame's, it
-    // takes the cheapest one that some chip already covers, and tucks behind that chip's front.
-    // Only when no pile will have it does it simply overlap where it would hang.
+    // With no free spot, the chip joins a pile of its kind: of the nearest spots, and last
+    // frame's, it takes the cheapest one that a chip of its kind already covers, and tucks
+    // behind that chip's front. Failing that, it joins the nearest pile of its kind in reach of
+    // its entry. Only when no pile will have it does it simply overlap where it would hang.
     private fun crowdedPlacement(
         index: Int,
         request: JournalChipRequest,
@@ -379,13 +387,31 @@ internal object JournalChipLayout {
             if (cost >= bestCost) continue
             var front = -1
             layout.grid.forEachNear(box, 0f) { owner, other ->
-                if (front < 0 && owner != OBSTACLE && within(box, other, 0f)) front = layout.placements[owner]!!.front
+                if (front < 0 && owner != OBSTACLE && within(box, other, 0f)) {
+                    val lead = layout.placements[owner]!!.front
+                    if (layout.mayJoin(index, lead, crowded = true) && layout.withinTuckReach(index, lead)) front = lead
+                }
             }
-            if (front < 0 || !layout.mayJoin(index, front, crowded = true) || !layout.withinTuckReach(index, front)) continue
+            if (front < 0) continue
             val pile = layout.pileBoxFor(index, front) ?: continue
             bestFront = front
             bestPile = pile
             bestCost = cost
+        }
+        if (bestPile == null) {
+            val ownX = request.anchorX + spec.sideOffset
+            val near = JournalChipBox(ownX - spec.repeatReach, 0f, ownX + spec.repeatReach, 0f)
+            var bestDistance = Float.POSITIVE_INFINITY
+            layout.grid.forEachNear(near, 0f) { owner, _ ->
+                if (owner == OBSTACLE) return@forEachNear
+                val front = layout.placements[owner]!!.front
+                val distance = kotlin.math.abs(layout.placements[front]!!.box.left - ownX)
+                if (distance > spec.repeatReach || distance >= bestDistance || !layout.mayJoin(index, front, crowded = true)) return@forEachNear
+                val pile = layout.pileBoxFor(index, front) ?: return@forEachNear
+                bestDistance = distance
+                bestFront = front
+                bestPile = pile
+            }
         }
         val pile = bestPile
         if (pile != null) {
@@ -526,29 +552,41 @@ internal object JournalChipLayout {
      * Where the chips behind each front of [piles] rest while their pile is closed, as `dx` and
      * `dy` from their placed box: part of the way toward the spot [spreadOf] moves them to when
      * the pile opens, so each peeks out the way it will go. The first [visibleLayers] chips behind
-     * a front peek, the first at most [peek] past it and the next twice that; deeper ones, and any
-     * with nowhere to spread, stay wholly behind. The result has one entry per chip, of [count].
+     * a front that [mayPeek] peek, the first at most [peek] past it and the next twice that. A
+     * peek never covers a chip outside its pile, by half as much where the full peek would;
+     * deeper chips, and any with nowhere to spread, stay wholly behind. The result lines up
+     * with [boxes].
      */
     fun peeks(
-        count: Int,
+        boxes: List<JournalChipBox>,
         piles: List<IntArray>,
         visibleLayers: Int,
         peek: Float,
+        mayPeek: (Int) -> Boolean = { true },
         spreadOf: (IntArray) -> JournalChipSpread
     ): Array<FloatArray?> {
-        val peeks = arrayOfNulls<FloatArray>(count)
+        val peeks = arrayOfNulls<FloatArray>(boxes.size)
         piles.forEach { pile ->
             // A spread places its members in order, so the first few land just where they do
-            // when the whole pile opens.
-            val shown = pile.copyOf(minOf(pile.size, visibleLayers + 1))
+            // when the whole pile opens; chips that may not peek come after them in a pile.
+            val peeking = pile.drop(1).filter(mayPeek).take(visibleLayers)
+            val shown = (listOf(pile[0]) + peeking).toIntArray()
+            if (shown.size < 2) return@forEach
             val spread = spreadOf(shown)
+            val inPile = pile.toHashSet()
+            val outside = boxes.indices.filter { it !in inPile }
             for (layer in 1 until shown.size) {
                 if (spread.stuck[layer]) continue
                 val dx = spread.shifts[layer][0]
                 val dy = spread.shifts[layer][1]
                 val length = kotlin.math.hypot(dx, dy)
                 if (length <= 0f) continue
-                val part = minOf(PEEK_PART, layer * peek / length)
+                val box = boxes[shown[layer]]
+                val full = minOf(PEEK_PART, layer * peek / length)
+                val part = listOf(full, full / 2f).firstOrNull { part ->
+                    val moved = JournalChipBox(box.left + dx * part, box.top + dy * part, box.right + dx * part, box.bottom + dy * part)
+                    outside.none { within(moved, boxes[it], 0f) && !within(box, boxes[it], 0f) }
+                } ?: continue
                 peeks[shown[layer]] = floatArrayOf(dx * part, dy * part)
             }
         }

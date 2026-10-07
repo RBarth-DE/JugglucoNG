@@ -234,7 +234,7 @@ class JournalChipLayoutTests {
         fun spreadOf(members: IntArray) = JournalChipLayout.spread(boxes, members, 0f, 1000f, 8f, 400f, 4f, 4f, 200f)
         val shifts = spreadOf(pile).shifts
 
-        val peeks = JournalChipLayout.peeks(4, listOf(pile), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
+        val peeks = JournalChipLayout.peeks(boxes, listOf(pile), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
 
         assertEquals(null, peeks[0])
         assertEquals(null, peeks[3])
@@ -264,11 +264,38 @@ class JournalChipLayoutTests {
     }
 
     @Test
+    fun aFoldedChipStaysWhollyBehind() {
+        val boxes = List(3) { box(100f, 200f) }
+        fun spreadOf(members: IntArray) = JournalChipLayout.spread(boxes, members, 0f, 1000f, 8f, 400f, 4f, 4f, 200f)
+
+        // Chip 1 is folded; chip 2, behind it, peeks in its place.
+        val peeks = JournalChipLayout.peeks(boxes, listOf(intArrayOf(0, 1, 2)), visibleLayers = 1, peek = 12f, mayPeek = { it != 1 }, spreadOf = ::spreadOf)
+
+        assertEquals(null, peeks[1])
+        assertTrue(peeks[2] != null)
+    }
+
+    @Test
+    fun aPeekNeverCoversAChipOutsideItsPile() {
+        // The pile spreads up and to the left, but a chip outside it sits right above the front,
+        // where a full peek would cover it and half a peek does not.
+        val boxes = listOf(box(100f, 200f), box(100f, 200f), box(100f, 160f, width = 40f))
+        val spread = JournalChipSpread(arrayOf(floatArrayOf(0f, 0f), floatArrayOf(-60f, -40f)), BooleanArray(2))
+
+        val peeks = JournalChipLayout.peeks(boxes, listOf(intArrayOf(0, 1)), visibleLayers = 2, peek = 100f) { spread }
+
+        val (dx, dy) = peeks[1]!!.let { it[0] to it[1] }
+        val moved = JournalChipBox(boxes[1].left + dx, boxes[1].top + dy, boxes[1].right + dx, boxes[1].bottom + dy)
+        assertTrue(!overlapping(moved, boxes[2]))
+        assertEquals(-12f, dx, 0.01f)
+    }
+
+    @Test
     fun aChipWithNowhereToSpreadDoesNotPeek() {
         val boxes = listOf(box(0f, 8f), box(2f, 8f))
         fun spreadOf(members: IntArray) = JournalChipLayout.spread(boxes, members, 0f, 102f, 8f, 8f, 4f, 4f, 200f)
 
-        val peeks = JournalChipLayout.peeks(2, listOf(intArrayOf(0, 1)), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
+        val peeks = JournalChipLayout.peeks(boxes, listOf(intArrayOf(0, 1)), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
 
         assertEquals(null, peeks[1])
     }
@@ -319,6 +346,25 @@ class JournalChipLayoutTests {
         assertTrue(placements.drop(1).all { it.crowded && it.tuck != null && it.front == 0 })
         assertTrue(placements.all { it.box.left == placements[0].box.left })
         assertEquals(listOf(listOf(0, 1, 2)), JournalChipLayout.piles(placements, 12f, 8f).map { it.toList() })
+    }
+
+    @Test
+    fun aCrowdedChipNeverPilesWithAnotherKind() {
+        // No free spot for the carbs chip, and the only pile in its way is insulin.
+        val tight = stacking.copy(maxX = 120f, minTop = 190f, maxTop = 210f, maxNudge = 0)
+
+        val placements = JournalChipLayout.place(
+            listOf(
+                request(10f, stackKey = "a").copy(kind = "insulin"),
+                request(12f, stackKey = "b").copy(kind = "insulin"),
+                request(14f, stackKey = "c").copy(kind = "carbs")
+            ),
+            tight
+        )
+
+        assertEquals(0, placements[1].front)
+        assertEquals(2, placements[2].front)
+        assertTrue(placements[2].tuck == null)
     }
 
     @Test

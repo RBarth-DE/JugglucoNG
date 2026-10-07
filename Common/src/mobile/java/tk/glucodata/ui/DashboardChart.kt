@@ -3560,6 +3560,8 @@ fun InteractiveGlucoseChart(
             val journalChipLastSlots = remember(journalChipLayoutZoom) { HashMap<Long, JournalChipSlot>() }
             // Which chip's pile each chip joined, so fronts and layers hold still from frame to frame.
             val journalChipLastTucks = remember(journalChipLayoutZoom) { HashMap<Long, Long>() }
+            // How wide each pile front's total was last frame, so it is laid out with room for it.
+            val journalChipLastTotalWidths = remember(journalChipLayoutZoom) { HashMap<Long, Float>() }
             val chipLabels = chipMarkers.map { marker -> marker.detailText.ifBlank { marker.title.take(10) } }
             val chipWidths = chipLabels.map { label ->
                 // A pixel of slack so a chip laid out at its measured width never ellipsizes.
@@ -3593,14 +3595,16 @@ fun InteractiveGlucoseChart(
                     JournalChipRequest(
                         anchorX = chipAnchorXs[index],
                         baseTop = journalChipBaseTop(marker) + journalChipPillInsetYPx,
-                        width = chipWidths[index],
+                        width = maxOf(chipWidths[index], journalChipLastTotalWidths[marker.entryId] ?: 0f),
                         previous = journalChipLastSlots[marker.entryId],
                         // Chips showing the same thing may tuck behind one another.
                         stackKey = marker.type to chipLabels[index],
                         foldInto = chipFoldInto[index],
                         previousTuck = journalChipLastTucks[marker.entryId]
                             ?.let(chipIndexOfEntry::get)
-                            ?.let(::JournalChipTuck)
+                            ?.let(::JournalChipTuck),
+                        // Insulin never piles with carbs or a note, so a pile always reads as one thing.
+                        kind = marker.type
                     )
                 },
                 journalChipLayoutSpec,
@@ -3722,18 +3726,21 @@ fun InteractiveGlucoseChart(
 
             // While a pile is closed, the chips behind its front peek out dimmed, part of the way
             // toward where they go when it opens, so the pile shows which way it will spread.
+            // A folded chip can't be told apart from its front, so it stays wholly behind.
             val chipPeeks = JournalChipLayout.peeks(
-                chipMarkers.size,
+                chipBoxes,
                 chipGroups.filter { openChipGroup == null || it[0] != openChipGroup[0] },
                 journalChipLayoutSpec.visibleLayers,
-                journalChipLayoutSpec.peek
+                journalChipLayoutSpec.peek,
+                mayPeek = { !chipPlacements[it].folded }
             ) { spreadOf(it, keep = true, peeking = true) }
             val chipPilePosition = IntArray(chipMarkers.size)
             chipGroups.forEach { group -> group.forEachIndexed { position, index -> chipPilePosition[index] = position } }
 
             // A closed pile of one insulin's doses, or of carbs, shows their total on its front
-            // beside the count, so 2 U and 2 U read "4 U ×2". A wider total grows away from the
-            // entry, staying on the chart.
+            // beside the count, so 2 U and 2 U read "4 U ×2". The front is laid out at last
+            // frame's total width; a total wider than that, new this frame, grows away from the
+            // entry, staying on the chart, until the next frame makes room for it.
             fun pileTotal(group: IntArray): String? {
                 val lead = chipMarkers[group[0]]
                 if (lead.type != JournalEntryType.INSULIN && lead.type != JournalEntryType.CARBS) return null
@@ -3747,20 +3754,27 @@ fun InteractiveGlucoseChart(
                 return journalMarkerAmountText(lead.type, total.toFloat())
             }
             val chipShownLabels = chipLabels.toTypedArray()
-            val chipShownWidths = chipWidths.toFloatArray()
+            val chipShownWidths = FloatArray(chipMarkers.size) { chipBoxes[it].right - chipBoxes[it].left }
             val chipShownLefts = FloatArray(chipMarkers.size) { chipBoxes[it].left }
+            val chipTotalWidths = HashMap<Long, Float>()
             chipGroups.forEach { group ->
                 val front = group[0]
-                if (openChipGroup?.contains(front) == true) return@forEach
                 val total = pileTotal(group) ?: return@forEach
-                val width = maxOf(chipWidths[front], journalChipChromePx + journalChipTextWidth(total).coerceAtMost(journalChipMaxTextPx) + 1f)
+                val width = journalChipChromePx + journalChipTextWidth(total).coerceAtMost(journalChipMaxTextPx) + 1f
+                chipTotalWidths[chipMarkers[front].entryId] = width
+                // Open, the front shows its own value again, in the room kept for the total.
+                if (openChipGroup?.contains(front) == true) return@forEach
+                val laidOut = chipShownWidths[front]
                 var left = chipShownLefts[front]
-                if (chipPlacements[front].slot.side < 0) left -= width - chipWidths[front]
-                if (chipAnchorXs[front] in 0f..overlayDataWidthPx) left = left.coerceIn(0f, (overlayDataWidthPx - width).coerceAtLeast(0f))
+                if (width > laidOut && chipPlacements[front].slot.side < 0) left -= width - laidOut
+                val shown = maxOf(width, laidOut)
+                if (chipAnchorXs[front] in 0f..overlayDataWidthPx) left = left.coerceIn(0f, (overlayDataWidthPx - shown).coerceAtLeast(0f))
                 chipShownLabels[front] = total
-                chipShownWidths[front] = width
+                chipShownWidths[front] = shown
                 chipShownLefts[front] = left
             }
+            journalChipLastTotalWidths.clear()
+            journalChipLastTotalWidths.putAll(chipTotalWidths)
 
             // Every chip rests in the chart's own frame: x relative to its entry, so panning
             // moves it with the chart at once.
@@ -3789,11 +3803,11 @@ fun InteractiveGlucoseChart(
             chipShownLastFrame.clear()
             chipMarkers.mapTo(chipShownLastFrame) { it.entryId }
             chipMotion.keys.retainAll(chipShownLastFrame)
-            // A chip wholly hidden behind its pile's peeking ones shows only as its front's
+            // A chip wholly hidden behind its pile's front shows only as the front's
             // count, so it is left out until its pile opens; one still springing back after its
             // pile closes stays until it lands. Any chip that still shows is always there.
             val chipComposed = BooleanArray(chipMarkers.size) { index ->
-                chipPilePosition[index] <= journalChipLayoutSpec.visibleLayers ||
+                chipPilePosition[index] == 0 || chipPeeks[index] != null ||
                     openChipGroup?.contains(index) == true ||
                     !chipMotions[index].isSettled
             }
@@ -5195,17 +5209,17 @@ private fun JournalMarkerChip(
             // bleeding its label through.
             color = androidx.compose.ui.graphics.lerp(
                 MaterialTheme.colorScheme.surfaceContainerHigh,
-                MaterialTheme.colorScheme.surfaceContainer,
+                MaterialTheme.colorScheme.surfaceContainerLow,
                 dim
             ),
-            border = BorderStroke(1.dp, tint.copy(alpha = 0.18f * (1f - dim * 0.5f))),
+            border = BorderStroke(1.dp, tint.copy(alpha = 0.18f * (1f - dim * 0.7f))),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp
         ) {
             Row(
                 modifier = Modifier
                     .padding(horizontal = 8.dp, vertical = 5.dp)
-                    .graphicsLayer { alpha = 1f - dim * 0.45f },
+                    .graphicsLayer { alpha = 1f - dim * 0.6f },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
