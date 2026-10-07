@@ -553,16 +553,26 @@ object AnytimeConstants {
     }
 
     /**
-     * Pick the handshake/family name from the candidates at connect time, in order:
-     * the registry-cached name, the live advertised name, then the serial. Returns the
-     * first candidate that resolves to a known family so a generic advertisement
-     * ("CGM Sensor") can't shadow the SN##-bearing serial; falls back to the first
-     * non-blank candidate when none match.
+     * A known SN## identity beats the shared "Anytime" brand prefix, regardless of
+     * source: SN91 was observed changing its BLE name to "Anytime  4pro" at the
+     * same address on reconnect. Prefer connect-time names over GATT/cache/serial
+     * within that specificity, and only select CT5 by brand when no SN## is known.
+     * If none classify, keep the first non-blank name.
      */
     @JvmStatic
-    fun resolveHandshakeName(vararg candidates: String?): String {
-        val trimmed = candidates.map { it?.trim().orEmpty() }
-        return trimmed.firstOrNull { resolveFamily(it).family != Family.UNKNOWN }
+    fun resolveHandshakeName(
+        cachedName: String?,
+        connectedName: String?,
+        activeName: String?,
+        serial: String?,
+    ): String {
+        val trimmed = listOf(connectedName, activeName, cachedName, serial)
+            .map { it?.trim().orEmpty() }
+        return trimmed.firstOrNull {
+            val family = resolveFamily(it).family
+            family != Family.UNKNOWN && family != Family.CT5
+        }
+            ?: trimmed.firstOrNull { resolveFamily(it).family != Family.UNKNOWN }
             ?: trimmed.firstOrNull { it.isNotBlank() }.orEmpty()
     }
 

@@ -29,6 +29,7 @@ import java.util.ArrayDeque
 import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 import kotlin.math.abs
 import kotlin.math.round
@@ -228,6 +229,10 @@ class ICanHealthBleManager(
     private val pendingHistoryBatch = LinkedHashMap<Int, PendingHistoryReading>()
     private val recentLiveGlucoseMgdl = ArrayDeque<Float>(RECENT_GLUCOSE_WINDOW_SIZE)
     private val rejectedOnboardingAddresses = CopyOnWriteArraySet<String>()
+    // The address the onboarding scan picked by name or advert, as opposed to one the user or the
+    // registry supplied. Only a guess like that may be dropped for not being a CGM.
+    @Volatile private var onboardingScanPickedAddress: String? = null
+    private val nonCgmCandidateStrikes = ConcurrentHashMap<String, Int>()
 
     private var provisionalSensorIdForAdoption: String? =
         serial.takeIf { ICanHealthConstants.isProvisionalSensorId(it) }
@@ -1131,6 +1136,10 @@ class ICanHealthBleManager(
         if (knownAddress != null) {
             return address != null && address.equals(knownAddress, ignoreCase = true)
         }
+        return notePickedByOnboardingScan(candidateAddress, matchesUnaddressedName(trimmedName))
+    }
+
+    private fun matchesUnaddressedName(trimmedName: String): Boolean {
         val expectedDisplayName = mygetDeviceName().trim().takeIf { it.isNotEmpty() }
         if (expectedDisplayName != null && trimmedName.equals(expectedDisplayName, ignoreCase = true)) {
             return true
@@ -1143,6 +1152,13 @@ class ICanHealthBleManager(
             return true
         }
         return ICanHealthConstants.isICanHealthDevice(trimmedName)
+    }
+
+    private fun notePickedByOnboardingScan(address: String?, matched: Boolean): Boolean {
+        if (matched && address != null) {
+            onboardingScanPickedAddress = address
+        }
+        return matched
     }
 
     override fun matchScanResult(result: ScanResult): Boolean {
@@ -1160,7 +1176,7 @@ class ICanHealthBleManager(
         val carriesCgmServiceData = record.serviceData
             ?.keys
             ?.any { it.uuid == ICanHealthConstants.CGM_SERVICE } == true
-        return advertisesCgmService || carriesCgmServiceData
+        return notePickedByOnboardingScan(address, advertisesCgmService || carriesCgmServiceData)
     }
 
     override fun reconnect(now: Long): Boolean {
@@ -1361,9 +1377,13 @@ class ICanHealthBleManager(
 
         if (charMeasurement == null) {
             Log.e(TAG, "CGM measurement characteristic missing")
+            if (rejectNonCgmOnboardingCandidate(gatt)) {
+                return
+            }
             gatt.disconnect()
             return
         }
+        gatt.device?.address?.trim()?.uppercase(Locale.US)?.let { nonCgmCandidateStrikes.remove(it) }
 
         setUiStatus(UiStatusKind.PREPARING)
         if (charSpecificOps != null) {
@@ -1559,15 +1579,48 @@ class ICanHealthBleManager(
         finishGattOp()
     }
 
+    private fun isAwaitingOnboardingIdentity(): Boolean =
+        provisionalSensorIdForAdoption != null || ICanHealthConstants.isProvisionalSensorId(SerialNumber)
+
+    /**
+     * Onboarding found this peripheral by name or advert, and its GATT table says it is not a CGM
+     * (the Anytime `SN91…` serial-shaped name passes the loose iCan name check). Without this the
+     * driver reconnected to it every 8 s forever and never looked at another candidate. Only an
+     * address the onboarding scan picked qualifies, and only after
+     * [ICanHealthConstants.NON_CGM_CANDIDATE_REJECT_STRIKES] consecutive conclusive discoveries.
+     */
+    private fun rejectNonCgmOnboardingCandidate(gatt: BluetoothGatt): Boolean {
+        if (!isAwaitingOnboardingIdentity()) {
+            return false
+        }
+        val address = gatt.device?.address?.trim()?.uppercase(Locale.US) ?: return false
+        if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
+            return false
+        }
+        val services = runCatching { gatt.services.map { it.uuid } }.getOrDefault(emptyList())
+        if (!ICanHealthConstants.isConclusivelyNotCgm(services)) {
+            nonCgmCandidateStrikes.remove(address)
+            return false
+        }
+        val strikes = (nonCgmCandidateStrikes[address] ?: 0) + 1
+        if (strikes < ICanHealthConstants.NON_CGM_CANDIDATE_REJECT_STRIKES) {
+            nonCgmCandidateStrikes[address] = strikes
+            Log.w(TAG, "iCan candidate address=$address has no CGM service ($strikes/${ICanHealthConstants.NON_CGM_CANDIDATE_REJECT_STRIKES}); checking once more")
+            return false
+        }
+        nonCgmCandidateStrikes.remove(address)
+        Log.w(TAG, "Rejected iCan candidate address=$address: no CGM service on ${services.size} services")
+        dropOnboardingCandidate(address)
+        return true
+    }
+
     private fun rejectMismatchedOnboardingCandidate(
         gatt: BluetoothGatt,
         rawSerial: String,
         resolvedSerial: String,
     ): Boolean {
         val expectedOnboardingSn = onboardingDeviceSn ?: return false
-        val isAwaitingIdentity = provisionalSensorIdForAdoption != null ||
-            ICanHealthConstants.isProvisionalSensorId(SerialNumber)
-        if (!isAwaitingIdentity) {
+        if (!isAwaitingOnboardingIdentity()) {
             return false
         }
         val identityMatches =
@@ -1579,16 +1632,22 @@ class ICanHealthBleManager(
         }
 
         val address = gatt.device?.address?.trim()?.uppercase(Locale.US)
-        if (address != null) {
-            rejectedOnboardingAddresses.add(address)
-        }
         Log.w(
             TAG,
             "Rejected iCan candidate address=${address ?: "unknown"}: " +
                 "onboarding=${ICanHealthConstants.onboardingIdentityPrefix(expectedOnboardingSn)} " +
                 "device=$resolvedSerial"
         )
+        dropOnboardingCandidate(address)
+        return true
+    }
 
+    /** Forget a wrong onboarding candidate and go back to scanning for the next one. */
+    private fun dropOnboardingCandidate(address: String?) {
+        if (address != null) {
+            rejectedOnboardingAddresses.add(address)
+        }
+        onboardingScanPickedAddress = null
         rawSerialFromDevice = null
         serialFromDevice = null
         close()
@@ -1601,7 +1660,6 @@ class ICanHealthBleManager(
                 SensorBluetooth.startscan()
             }
         }, 250L)
-        return true
     }
 
     override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {

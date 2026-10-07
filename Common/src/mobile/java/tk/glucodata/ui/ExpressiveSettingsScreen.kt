@@ -1195,7 +1195,7 @@ fun NotificationSettingsSheet(
     
     // Font Settings
     var fontSize by remember { mutableFloatStateOf(prefs.getFloat("notification_font_size", 1.0f)) }
-    var fontType by remember { mutableIntStateOf(prefs.getInt("notification_font_family", 0)) } // 0=App, 1=System
+    var fontType by remember { mutableIntStateOf(prefs.getInt("notification_font_family", 0)) }
     var fontWeight by remember { mutableIntStateOf(prefs.getInt("notification_font_weight", 400)) }
     
     // Arrow Settings
@@ -1224,6 +1224,7 @@ fun NotificationSettingsSheet(
                  .putBoolean("notification_chart_collapsed", collapsedChart)
                  .putBoolean("notification_chart_target_range", showTargetRange)
                  .apply()
+            viewModel.refreshNotificationSurfaces()
         }
     }
 
@@ -1249,24 +1250,21 @@ fun NotificationSettingsSheet(
             // === FONT SECTION ===
             SectionLabel("Font", topPadding = 0.dp, modifier = Modifier.padding(horizontal = 24.dp))
             
-            // Font Family Toggle
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 24.dp)) {
                 FilterChip(
                     selected = fontType == 0,
                     onClick = { fontType = 0; save() },
                     label = { Text(stringResource(R.string.font_app_plex)) }
-//                    leadingIcon = { if(fontType == 0) Icon(Icons.Filled.Check, null) }
                 )
                 FilterChip(
                     selected = fontType == 1,
                     onClick = { fontType = 1; save() },
                     label = { Text(stringResource(R.string.font_system_google_sans)) }
-//                    leadingIcon = { if(fontType == 1) Icon(Icons.Filled.Check, null) }
                 )
             }
             Spacer(Modifier.height(8.dp))
 
-            // Font Weight - only on Android 12+ (API 31) where RemoteViews supports setFontVariationSettings
+            // Font weight for the custom notification value rendering.
             if (android.os.Build.VERSION.SDK_INT >= 31) {
                 Text(stringResource(R.string.font_weight_label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
                 Row(
@@ -1828,6 +1826,7 @@ private fun LanguagePickerDialog(onDismiss: () -> Unit) {
         "Chinese" to "zh",
         "German" to "de",
         "French" to "fr",
+        "Hungarian" to "hu",
         "Italian" to "it",
         "Dutch" to "nl",
         "Polish" to "pl",
