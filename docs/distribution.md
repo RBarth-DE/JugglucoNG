@@ -167,7 +167,7 @@ regular release, publication has no approval gate: requesting unattended nightli
 authorizes publication of these trusted main snapshots. PR signing still requires
 its separate owner gate. No new secrets are needed.
 
-The **seven most recent published nightlies** are retained. Cleanup deletes only
+The **three most recent published nightlies** are retained. Cleanup deletes only
 this automation's marked, dated prereleases and their tags; it preserves regular
 releases, unrelated prereleases, drafts, and any pinned vendor baseline. Retention
 also runs on skipped-build days so failed cleanup can recover. This keeps normal

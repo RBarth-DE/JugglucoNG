@@ -138,7 +138,7 @@ class Publication(unittest.TestCase):
             nightly.publish(tag)
         helper.publish_assets.assert_not_called()
 
-    def test_keep_seven_deletes_only_owned_published_nightlies_and_protects_pinned_baseline(self):
+    def test_keep_three_deletes_only_owned_published_nightlies_and_protects_pinned_baseline(self):
         items = [release(day=date(2026, 10, d)) for d in range(1, 11)]
         items += [release(tag_name='1.2.3-Alpha'), release(body='other automation'), release(draft=True)]
         pinned = f'https://github.com/{nightly.REPO}/releases/download/{items[0]["tag_name"]}/source.apk'
@@ -147,7 +147,7 @@ class Publication(unittest.TestCase):
              patch.object(nightly.subprocess, 'run') as run:
             nightly.prune(items)
         deleted = [call.args[0][3] for call in run.call_args_list]
-        self.assertEqual(set(deleted), {items[1]['tag_name'], items[2]['tag_name']})
+        self.assertEqual(set(deleted), {items[i]['tag_name'] for i in range(1, 7)})
         self.assertTrue(all('--cleanup-tag' in call.args[0] for call in run.call_args_list))
 
 
