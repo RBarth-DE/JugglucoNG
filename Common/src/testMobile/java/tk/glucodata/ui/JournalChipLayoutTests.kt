@@ -361,4 +361,22 @@ class JournalChipLayoutTests {
 
         assertTrue(placements.all { it.box.left >= 0f && it.box.right <= 400f })
     }
+
+    @Test
+    fun aChipPastAFullDeckWithNoFreeSpotStillJoinsIt() {
+        val tight = stacking.copy(maxX = 200f, minTop = 190f, maxTop = 210f, maxNudge = 0, maxStack = 4)
+
+        val placements = JournalChipLayout.place((0 until 5).map { request(10f + it, stackKey = "0,2") }, tight)
+
+        assertTrue(placements.all { it.front == 0 })
+        assertEquals(listOf(listOf(0, 1, 2, 3, 4)), JournalChipLayout.piles(placements, 12f, 8f).map { it.toList() })
+    }
+
+    @Test
+    fun aChipArrivingFromTheRightLeavesARightHandSpotItHadKept() {
+        // Its entry is past the right edge, and last frame it hung to the right of it.
+        val placed = JournalChipLayout.place(listOf(request(420f, previous = JournalChipSlot.Preferred)), spec).single()
+
+        assertEquals(-1, placed.slot.side)
+    }
 }

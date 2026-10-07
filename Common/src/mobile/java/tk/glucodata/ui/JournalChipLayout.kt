@@ -137,7 +137,7 @@ internal object JournalChipLayout {
             if (index in folded || request.previousTuck != null) return@forEachIndexed
             val previous = request.previous ?: return@forEachIndexed
             val box = boxFor(request, previous, spec) ?: return@forEachIndexed
-            if (request.anchorX <= spec.maxX && offScreenOf(request, box, spec) != 0f) return@forEachIndexed
+            if (leavesChart(request, box, spec)) return@forEachIndexed
             // A pixel of slack, so chips placed exactly a gap apart are not torn apart by the
             // rounding of a pan.
             if (!layout.isFree(box, spec.gap - KEEP_SLACK)) return@forEachIndexed
@@ -242,18 +242,15 @@ internal object JournalChipLayout {
 
         /**
          * Whether chip [index] may join the deck led by [front]: the front must lead its own
-         * pile. A repeat joins only a deck of its own value with room; any other chip, having
-         * found no free spot, may join any deck.
+         * pile. By choice, a repeat joins only a deck of its own value with room; a chip with no
+         * free spot at all, [crowded], may join any deck however full, so it is always counted.
          */
-        fun mayJoin(index: Int, front: Int): Boolean {
+        fun mayJoin(index: Int, front: Int, crowded: Boolean = false): Boolean {
             val lead = placements.getOrNull(front) ?: return false
             if (lead.front != front || lead.folded) return false
+            if (crowded) return true
             val key = requests[index].stackKey
-            return if (key != null && key == requests[front].stackKey) {
-                pileSizes[front] < spec.maxStack
-            } else {
-                true
-            }
+            return key == null || key != requests[front].stackKey || pileSizes[front] < spec.maxStack
         }
 
         // Fronts with the same value whose entries sit close enough for chip [index] to join.
@@ -428,7 +425,7 @@ internal object JournalChipLayout {
             layout.grid.forEachNear(box, 0f) { owner, other ->
                 if (front < 0 && owner != OBSTACLE && within(box, other, 0f)) front = layout.placements[owner]!!.front
             }
-            if (front < 0 || !layout.mayJoin(index, front) || !layout.withinTuckReach(index, front)) continue
+            if (front < 0 || !layout.mayJoin(index, front, crowded = true) || !layout.withinTuckReach(index, front)) continue
             val deck = layout.deckBoxFor(index, front, null) ?: continue
             bestFront = front
             bestDeck = deck
