@@ -114,9 +114,11 @@ public class Libre2GattCallback extends SuperGattCallback {
 	}
 
 	private synchronized void requestDisconnect(BluetoothGatt gatt, long delayMillis) {
-		if (gatt == null || gatt != mBluetoothGatt || disconnectingGatt == gatt) return;
-		disconnectingGatt = gatt;
+		if (gatt == null || gatt != mBluetoothGatt) return;
+		// Retain the latest reconnect delay without restarting an in-progress disconnect.
 		reconnectDelayMillis = delayMillis;
+		if (disconnectingGatt == gatt) return;
+		disconnectingGatt = gatt;
 		endBLEHandler();
 		// Android can omit DISCONNECTED. Repeated recovery requests must not extend this wait.
 		disconnectDeadline.arm(gatt, 2_000L);

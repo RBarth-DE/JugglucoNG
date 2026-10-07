@@ -230,6 +230,28 @@ java += r'''
         Applic.scheduler.advance(1);check(cb.mActiveBluetoothDevice.calls==2,"delayed fresh connect missing");
         fallback.task.run();check(cb.mActiveBluetoothDevice.calls==2,"cancelled fallback retried twice");
 
+        // Diagnostic disconnect/connect requests must retain the later requested delay.
+        cb=fresh();old=cb.mBluetoothGatt;cb.disconnect();fallback=Applic.scheduler.last();
+        cb.connectDevice(100);
+        check(Applic.scheduler.last()==fallback&&old.disconnected==1,"delay update restarted disconnect");
+        cb.onConnectionStateChange(old,0,0);
+        Applic.scheduler.advance(99);check(cb.mActiveBluetoothDevice.calls==1,"diagnostic reconnect delay ignored");
+        Applic.scheduler.advance(1);check(cb.mActiveBluetoothDevice.calls==2,"diagnostic reconnect missing");
+        fallback.task.run();check(cb.mActiveBluetoothDevice.calls==2,"diagnostic fallback retried twice");
+
+        // Later resume requests update the delay without moving the original 2s fallback.
+        cb=fresh();old=cb.mBluetoothGatt;cb.disconnect();fallback=Applic.scheduler.last();
+        Applic.scheduler.advance(1_000);cb.connectDevice(500);
+        Applic.scheduler.advance(500);cb.connectDevice(750);
+        check(Applic.scheduler.last()==fallback&&old.disconnected==1,"resume extended disconnect deadline");
+        Applic.scheduler.advance(499);check(old.closed==0,"updated-delay fallback early");
+        Applic.scheduler.advance(1);
+        check(old.closed==1&&cb.mActiveBluetoothDevice.calls==1,"fallback ignored updated reconnect delay");
+        Applic.scheduler.advance(749);check(cb.mActiveBluetoothDevice.calls==1,"latest reconnect delay ignored");
+        Applic.scheduler.advance(1);check(cb.mActiveBluetoothDevice.calls==2,"updated reconnect missing");
+        ignoredCallbacks(cb,old);fallback.task.run();
+        check(cb.mActiveBluetoothDevice.calls==2,"updated-delay fallback retried twice");
+
         // A silent connection result retains the shared deadline; intermediate states do not cancel it.
         cb=fresh();old=cb.mBluetoothGatt;cb.onConnectionStateChange(old,0,1);
         Applic.scheduler.advance(119_999);check(old.closed==0,"connection deadline early");
