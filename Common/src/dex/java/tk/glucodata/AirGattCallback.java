@@ -93,27 +93,6 @@ class AirGattCallback extends SuperGattCallback {
     // free() takes it after this monitor, and nothing holding it waits for another.
     private final Object nativeLock = new Object();
 
-    // An address that turned out not to be a usable Air transmitter: the Air
-    // characteristics are missing or the firmware is unsupported. Scans skip it
-    // for a while instead of reconnecting at once. The wait is bounded because a
-    // stale GATT cache on the real transmitter can look the same.
-    private static final long REJECT_MILLIS = 15 * 60 * 1000L;
-    private volatile long rejectedUntil = 0L;
-    private volatile String rejectedAddress = null;
-    private boolean rejectedConnection = false;
-
-    private void rejectDevice(BluetoothGatt bluetoothGatt, String why) {
-        handshake = why;
-        wrotepass[1] = System.currentTimeMillis();
-        Log.e(LOG_ID, "rejectDevice: " + why);
-        rejectedUntil = System.currentTimeMillis() + REJECT_MILLIS;
-        rejectedAddress = bluetoothGatt.getDevice().getAddress();
-        rejectedConnection = true;
-        // The next connect scans for the transmitter instead of reusing the address.
-        searchforDeviceAddress();
-        disconnect();
-    }
-
     private boolean isCurrentGatt(BluetoothGatt gatt) {
         return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
     }
@@ -237,7 +216,6 @@ class AirGattCallback extends SuperGattCallback {
             Log.i(LOG_ID, SerialNumber + " onConnectionStateChange, status:" + status + ", state: " + (newState < state.length ? state[newState] : newState) + " bondstate=" + bondstate);
         }
         if (newState == BluetoothProfile.STATE_CONNECTED) {
-            rejectedConnection = false;
             bluetoothGatt.requestMtu(512);
             constatchange[0] = tim;
         } else {
@@ -245,10 +223,7 @@ class AirGattCallback extends SuperGattCallback {
             setConStatus(status);
             constatchange[1] = tim;
             if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                // Auto-connect would only reconnect to a rejected device.
-                final boolean rejected = rejectedConnection;
-                rejectedConnection = false;
-                if (!autoconnect || rejected) {
+                if (!autoconnect) {
                     bluetoothGatt.close();
                     mBluetoothGatt = null;
                     if (!stop) {
@@ -305,10 +280,7 @@ class AirGattCallback extends SuperGattCallback {
     private BluetoothGattCharacteristic charact22;
 
     @SuppressLint("MissingPermission")
-    private void discover(BluetoothGatt bluetoothGatt) {
-        // Handles from an earlier connection must not make this device look complete.
-        charact1 = charact2 = charact3 = charact4 = charact5 = charact6 = charact7 = null;
-        charact11 = charact21 = charact22 = null;
+    private boolean discover(BluetoothGatt bluetoothGatt) {
         for (BluetoothGattService bluetoothGattService : bluetoothGatt.getServices()) {
             if (doLog)
                 Log.i(LOG_ID, "Service: " + bluetoothGattService.getUuid().toString());
@@ -331,19 +303,20 @@ class AirGattCallback extends SuperGattCallback {
             }
         }
         if (charact11 == null || charact21 == null || charact22 == null) {
-            rejectDevice(bluetoothGatt, "Air data characteristics missing");
-            return;
+            Log.e(LOG_ID, "discover: ERROR: data characteristics missing");
+            return false;
         }
         if (didRun) {
             afterReads(bluetoothGatt);
         } else {
             final var first = askExtraInfo ? charact1 : charact3;
             if (first == null) {
-                rejectDevice(bluetoothGatt, (askExtraInfo ? UUIDchar1 : UUIDchar3) + " missing");
-                return;
+                Log.e(LOG_ID, "discover: ERROR: " + (askExtraInfo ? UUIDchar1 : UUIDchar3) + " missing");
+                return false;
             }
             bluetoothGatt.readCharacteristic(first);
         }
+        return true;
     }
 
     @Override
@@ -352,8 +325,8 @@ class AirGattCallback extends SuperGattCallback {
             return;
         if (doLog) {Log.i(LOG_ID, "BLE onServicesDiscovered, status: " + status);}
         if (status == GATT_SUCCESS) {
-            // Disconnects a device it rejects.
-            discover(bluetoothGatt);
+            if (!discover(bluetoothGatt))
+                disconnect();
             return;
         }
         disconnect();
@@ -450,7 +423,10 @@ class AirGattCallback extends SuperGattCallback {
                     readNext(bluetoothGatt, charact5);
                     return;
                 }
-                rejectDevice(bluetoothGatt, "Unsupported firmware " + fwRevision);
+                handshake = "Unsupported firmware " + fwRevision;
+                wrotepass[1] = System.currentTimeMillis();
+                Log.e(LOG_ID, "WRONG fwRevision: " + fwRevision);
+                bluetoothGatt.disconnect();
                 return;
             }
             case UUIDchar5: {
@@ -862,8 +838,6 @@ class AirGattCallback extends SuperGattCallback {
     /** Advertised as "CSAir " followed by the last four characters of the serial. */
     @Override
     public boolean matchDeviceName(String nameDevice, String address) {
-        if (address != null && address.equals(rejectedAddress) && System.currentTimeMillis() < rejectedUntil)
-            return false;
         final String start = "CSAir ";
         return nameDevice != null && SerialNumber.length() >= 4 && nameDevice.startsWith(start)
                 && nameDevice.regionMatches(start.length(), SerialNumber, SerialNumber.length() - 4, 4);

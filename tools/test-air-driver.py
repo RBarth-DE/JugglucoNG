@@ -143,7 +143,6 @@ def gatt(directory):
         'public void onCharacteristicChanged(',
         'public void onMtuChanged(',
         'private void afterReads(', 'private void enableDataOrBond(',
-        'private void rejectDevice(', 'public boolean matchDeviceName(',
         'public void onDescriptorWrite(', 'private synchronized void writeAppIdIfCurrent('])
     fixture = r'''
 package tk.glucodata;
@@ -155,15 +154,13 @@ class BluetoothDevice {
   int bonds, bondState;
   int getBondState() { return bondState; }
   boolean createBond() { ++bonds; return true; }
-  String address = "synthetic";
-  String getAddress() { return address; }
+  String getAddress() { return "synthetic"; }
 }
 class BluetoothGatt {
   static final int GATT_SUCCESS = 0;
-  int closes, reconnects, mtus, discovers, notifications, writes, disconnects;
+  int closes, reconnects, mtus, discovers, notifications, writes;
   final BluetoothDevice device = new BluetoothDevice();
   void writeCharacteristic(BluetoothGattCharacteristic c) { ++writes; }
-  void disconnect() { ++disconnects; }
   BluetoothDevice getDevice() { return device; }
   void close() { ++closes; }
   void connect() { ++reconnects; }
@@ -209,7 +206,7 @@ class SuperGattCallback extends PlatformCallback {
   static final String LOG_ID = "test";
   boolean stop, autoconnect;
   long dataptr = 1;
-  String SerialNumber = "synthetic", mActiveDeviceAddress = "synthetic", handshake;
+  String SerialNumber = "synthetic";
   BluetoothGatt mBluetoothGatt, locallyConnectedGatt;
   BluetoothDevice mActiveBluetoothDevice;
   long[] constatchange = new long[2], wrotepass = new long[2];
@@ -218,18 +215,14 @@ class SuperGattCallback extends PlatformCallback {
   final Deadline connectDeadline = new Deadline();
   void noteFirstGattCallback(String name, BluetoothGatt g) {}
   void setConStatus(int status) { ++stateChanges; }
-  void disconnect() { if (mBluetoothGatt != null) mBluetoothGatt.disconnect(); }
-  void searchforDeviceAddress() { mActiveDeviceAddress = null; }
+  void disconnect() {}
   void enableNotification(BluetoothGatt g, BluetoothGattCharacteristic c) { ++g.notifications; }
   // PRODUCTION_BASE
 }
 class AirGattCallback extends SuperGattCallback {
   static final boolean doLog = false;
   static final int GATT_SUCCESS = 0, BOND_BONDED = 12, GATT_INSUFFICIENT_AUTHENTICATION = 5, WRITE_TYPE_NO_RESPONSE = 1;
-  static final long REJECT_MILLIS = 15 * 60 * 1000L;
-  volatile long rejectedUntil;
-  volatile String rejectedAddress;
-  boolean rejectedConnection, unusedSensor;
+  boolean unusedSensor;
   static final String LOG_ID = "test", UUIDchar11 = "00000000-0000-0000-0000-000000000001",
       UUIDchar21 = "00000000-0000-0000-0000-000000000002", UUIDchar22 = "00000000-0000-0000-0000-000000000003";
   long datatime;
@@ -240,7 +233,7 @@ class AirGattCallback extends SuperGattCallback {
       charact21 = new BluetoothGattCharacteristic(UUIDchar21), charact22 = new BluetoothGattCharacteristic(UUIDchar22);
   int resets, frames, discoveries;
   void resetValues() { ++resets; }
-  void discover(BluetoothGatt g) { ++discoveries; }
+  boolean discover(BluetoothGatt g) { ++discoveries; return true; }
   void writeAuthIfCurrent(BluetoothGatt g) {}
   void onChar11Changed(BluetoothGatt g, byte[] bytes) { ++frames; }
   void onChar21Changed(BluetoothGattCharacteristic c, BluetoothGatt g, byte[] bytes) { ++frames; }
@@ -303,19 +296,7 @@ class AirGattCallback extends SuperGattCallback {
     cb.onDescriptorWrite(next, new BluetoothGattDescriptor(cb.charact22), 0);
     Applic.scheduler.drain();
     check(next.writes == 1, "current delayed app-ID write still runs");
-    cb.autoconnect = true;
-    cb.rejectDevice(next, "Air data characteristics missing");
-    check(next.disconnects == 1 && cb.mActiveDeviceAddress == null,
-          "a rejected device is dropped and its address forgotten");
-    cb.onConnectionStateChange(next, 0, BluetoothProfile.STATE_DISCONNECTED);
-    check(next.reconnects == 0 && next.closes == 1 && cb.mBluetoothGatt == null
-          && SensorBluetooth.blueone.connects == 2,
-          "rejected device is closed, not auto-reconnected; the next connect scans");
-    check(!cb.matchDeviceName("CSAir etic", "synthetic") && cb.matchDeviceName("CSAir etic", "other"),
-          "scans skip the rejected address only");
-    cb.rejectedUntil = 0;
-    check(cb.matchDeviceName("CSAir etic", "synthetic"), "rejection expires");
-    System.out.println("Air GATT: retired callbacks, local ownership, delayed work, freed pointer and wrong device passed");
+    System.out.println("Air GATT: retired callbacks, local ownership, delayed work and freed pointer passed");
   }
 }
 '''
