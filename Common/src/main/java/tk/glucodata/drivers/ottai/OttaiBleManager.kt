@@ -48,16 +48,22 @@ internal data class OttaiCurrentReadingDecision(
     val previousDisplayedHighWaterMs: Long,
     val displayAdvanced: Boolean,
     val publishCurrent: Boolean,
+    val persistReading: Boolean,
+    val replacesProvisionalTail: Boolean,
 )
 
 /** Stateful display/publication transition used by the manager and path-level tests. */
 internal class OttaiCurrentReadingState(initialPublishedHighWaterMs: Long = 0L) {
     private var displayedHighWaterMs = 0L
+    private var displayedDataNo = -1
+    private var displayedFromHistory = false
     private var publishedHighWaterMs = initialPublishedHighWaterMs.coerceAtLeast(0L)
+    private val pendingPublications = mutableSetOf<Long>()
 
     @Synchronized
     fun restorePublishedHighWater(highWaterMs: Long) {
         publishedHighWaterMs = highWaterMs.coerceAtLeast(0L)
+        pendingPublications.clear()
     }
 
     /**
@@ -70,22 +76,51 @@ internal class OttaiCurrentReadingState(initialPublishedHighWaterMs: Long = 0L) 
         live: Boolean,
         receivedAtMs: Long,
         sampleMs: Long,
-        persist: (Long) -> Unit = {},
+        dataNo: Int,
         onDisplayAdvance: () -> Unit = {},
     ): OttaiCurrentReadingDecision {
         val previousDisplayed = displayedHighWaterMs
         val freshLive = live && OttaiBleManager.isFreshLiveSample(receivedAtMs, sampleMs)
-        val publishCurrent = freshLive && sampleMs > publishedHighWaterMs
-        if (publishCurrent) {
-            persist(sampleMs)
-            publishedHighWaterMs = sampleMs
-        }
-        val displayAdvanced = sampleMs >= previousDisplayed && (!live || freshLive)
+        val replacesProvisionalTail = freshLive &&
+            displayedFromHistory &&
+            dataNo >= 0 &&
+            dataNo == displayedDataNo &&
+            previousDisplayed > 0L &&
+            sampleMs < previousDisplayed
+        val publishCurrent = freshLive &&
+            sampleMs > publishedHighWaterMs &&
+            pendingPublications.add(sampleMs)
+        // publishCurrent is only an in-memory claim. The durable watermark is committed after
+        // the shared realtime gate confirms that alerts/exchange/voice actually received it.
+        val displayAdvanced = replacesProvisionalTail ||
+            (sampleMs >= previousDisplayed && (!live || freshLive))
         if (displayAdvanced) {
             onDisplayAdvance()
             displayedHighWaterMs = sampleMs
+            displayedDataNo = dataNo
+            displayedFromHistory = !live
         }
-        return OttaiCurrentReadingDecision(previousDisplayed, displayAdvanced, publishCurrent)
+        val persistReading = !live ||
+            (freshLive && (sampleMs > previousDisplayed || replacesProvisionalTail))
+        return OttaiCurrentReadingDecision(
+            previousDisplayed,
+            displayAdvanced,
+            publishCurrent,
+            persistReading,
+            replacesProvisionalTail,
+        )
+    }
+
+    /** Commit a publication claim only after the shared realtime delivery path accepted it. */
+    @Synchronized
+    fun completePublication(
+        sampleMs: Long,
+        delivered: Boolean,
+        persist: (Long) -> Unit = {},
+    ) {
+        if (!pendingPublications.remove(sampleMs) || !delivered || sampleMs <= publishedHighWaterMs) return
+        persist(sampleMs)
+        publishedHighWaterMs = sampleMs
     }
 }
 
@@ -672,6 +707,7 @@ class OttaiBleManager(
         val displayValue: Float,
         val publishCurrent: Boolean,
         val persist: Boolean,
+        val replacesProvisionalTail: Boolean,
         val dataNo: Int,
         val temperatureC: Float,
     )
@@ -3232,13 +3268,7 @@ class OttaiBleManager(
             live = live,
             receivedAtMs = receivedAtMs,
             sampleMs = sampleMs,
-            persist = { claimedMs ->
-                Applic.app?.let { context ->
-                    if (!OttaiRegistry.saveLastPublishedGlucoseAtMs(context, SerialNumber.orEmpty(), claimedMs)) {
-                        Log.e(TAG, "failed to persist current publication claim sec=${claimedMs / 1000L}")
-                    }
-                }
-            },
+            dataNo = r.record.dataNo,
             onDisplayAdvance = {
                 lastGlucoseAtMs = sampleMs
                 lastGlucoseMmol = mmol
@@ -3250,14 +3280,13 @@ class OttaiBleManager(
         if (advancesDataNo) noteSeenDataNo(r.record.dataNo)
         Log.i(TAG, "BG dataNo=${r.record.dataNo} mmol=%.2f mgdl=%.0f raw=%d T=%.1f".format(
             mmol, mgdl, r.record.rawCurrent, r.record.temperatureC))
-        val shouldPersist = !live ||
-            (freshLiveSample && sampleMs > currentDecision.previousDisplayedHighWaterMs)
         return EmittedReading(
             sampleMs = sampleMs,
             mgdl = mgdl,
             displayValue = if (Applic.unit == 1) mmol else mgdl,
             publishCurrent = currentDecision.publishCurrent,
-            persist = shouldPersist,
+            persist = currentDecision.persistReading,
+            replacesProvisionalTail = currentDecision.replacesProvisionalTail,
             dataNo = r.record.dataNo,
             temperatureC = r.record.temperatureC.toFloat(),
         )
@@ -3530,6 +3559,16 @@ class OttaiBleManager(
         storeTemperatures(id, readings)
         val toPersist = readings.filter { it.persist }
         if (toPersist.isEmpty()) return
+        if (live) {
+            toPersist.lastOrNull { it.replacesProvisionalTail }?.let { corrected ->
+                val removed = HistorySyncAccess.deleteReadingsForSensorAfter(id, corrected.sampleMs)
+                Log.w(
+                    TAG,
+                    "replaced provisional history tail dataNo=${corrected.dataNo} " +
+                        "time=${corrected.sampleMs / 1000L} removed=$removed",
+                )
+            }
+        }
         // Tell the watch's ownership claim that this process decoded a live
         // reading over its own connection. Without this the claim never leaves
         // "requesting", so after a handoff the watch reads the sensor while the
@@ -3562,6 +3601,13 @@ class OttaiBleManager(
      */
     private fun mirrorHistoryIntoNative(id: String, readings: List<EmittedReading>) {
         if (readings.isEmpty()) return
+        // A provisional stream anchor can move when the first reliable live frame arrives.
+        // Native poll time is a realtime high-water mark and cannot safely contain rows dated
+        // from that provisional anchor: they would reject the corrected live callback as stale.
+        if (nativePresenceStartTimeMs() <= 0L) {
+            Log.i(TAG, "defer native history mirror until the stream anchor is reliable")
+            return
+        }
         runCatching {
             ensureNativePresenceShell("history-mirror")
             val stored = nativeGlucoseMirror.mirrorHistory(
@@ -3660,11 +3706,29 @@ class OttaiBleManager(
     }
 
     private fun publishCurrentReading(reading: EmittedReading) {
-        val id = SerialNumber ?: return
-        if (!reading.displayValue.isFinite() || reading.displayValue <= 0f) return
+        val id = SerialNumber
+        if (id.isNullOrBlank() || !reading.displayValue.isFinite() || reading.displayValue <= 0f) {
+            currentReadingState.completePublication(reading.sampleMs, delivered = false)
+            return
+        }
         markLocalReadingAccepted(reading.sampleMs)
-        SuperGattCallback.processExternalCurrentReading(id, reading.displayValue, 0f, reading.sampleMs, SENSOR_GEN)
-        Log.i(TAG, "current publish sec=${reading.sampleMs / 1000L} display=%.2f mgdl=%.1f".format(reading.displayValue, reading.mgdl))
+        val delivered = SuperGattCallback.processExternalCurrentReading(id, reading.displayValue,
+            0f,
+            reading.sampleMs,
+            SENSOR_GEN,
+        )
+        currentReadingState.completePublication(reading.sampleMs, delivered) { publishedMs ->
+            Applic.app?.let { context ->
+                if (!OttaiRegistry.saveLastPublishedGlucoseAtMs(context, id, publishedMs)) {
+                    Log.e(TAG, "failed to persist current publication claim sec=${publishedMs / 1000L}")
+                }
+            }
+        }
+        if (delivered) {
+            Log.i(TAG, "current publish sec=${reading.sampleMs / 1000L} display=%.2f mgdl=%.1f".format(reading.displayValue, reading.mgdl))
+        } else {
+            Log.w(TAG, "current publish rejected sec=${reading.sampleMs / 1000L}; claim released")
+        }
     }
 
     private fun resolveSampleTimeMs(

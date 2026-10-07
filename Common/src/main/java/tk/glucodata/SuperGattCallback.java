@@ -517,10 +517,13 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || alarm == 19;
     }
 
-    public static void processExternalCurrentReading(String sensorSerial, float glucoseValue, float rate,
+    /**
+     * @return true only when the shared realtime gate accepted and delivered this reading
+     */
+    public static boolean processExternalCurrentReading(String sensorSerial, float glucoseValue, float rate,
             long timmsec, int sensorgen) {
         if (!Float.isFinite(glucoseValue) || glucoseValue <= 0f || timmsec <= 0L) {
-            return;
+            return false;
         }
         if (glucosealarms == null) {
             glucosealarms = GlucoseAlarmsAccess.create(Applic.app);
@@ -530,7 +533,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 : Natives.lastsensorname();
         final int mgdlValue = Math.round(glucoseValue * (Applic.unit == 1 ? mgdLmult : 1.0f));
         // Both callers hand over a value CurrentDisplaySource already resolved.
-        dowithglucose(resolvedSensorSerial, mgdlValue, glucoseValue, rate, 0, timmsec,
+        return dowithglucose(resolvedSensorSerial, mgdlValue, glucoseValue, rate, 0, timmsec,
                 0L, Notify.glucosetimeout, sensorgen, LiveReadingLanes.resolved(glucoseValue));
     }
 
@@ -665,14 +668,14 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
      *                because CurrentDisplaySource calibrates what it is given and
      *                {@code gl} may already be calibrated (#431).
      */
-    static void dowithglucose(String SerialNumber, int mgdl, float gl, float rate, int alarm, long timmsec,
+    static boolean dowithglucose(String SerialNumber, int mgdl, float gl, float rate, int alarm, long timmsec,
             long sensorstartmsec, long showtime, int sensorgen, LiveReadingLanes reading) {
 
         if (gl == 0.0)
-            return;
+            return false;
         if (glucosealarms == null) {
             Log.e(LOG_ID, "glucosealarms==null");
-            return;
+            return false;
         }
 
         // Multi-sensor fix: Check if this sensor is the user-selected main sensor.
@@ -702,7 +705,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             // Still update the screen so charts/history reflect all sensors
             Applic.updatescreen();
             UiRefreshBus.requestDataRefresh();
-            return;
+            return false;
         }
 
         // History/replay rows are already persisted before this method. They must not
@@ -710,7 +713,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         if (!acceptRealtimeReading(SerialNumber, timmsec)) {
             Applic.updatescreen();
             UiRefreshBus.requestDataRefresh();
-            return;
+            return false;
         }
 
         glucosealarms.setagealarm(timmsec, showtime);
@@ -814,6 +817,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
 
         emitExchangeOutputs(SerialNumber, gl, rate, alarm, timmsec, sensorstartmsec, tim, sensorgen,
                 sglucose.value, true);
+        return true;
     }
 
     /**
