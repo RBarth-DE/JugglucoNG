@@ -636,6 +636,34 @@ public:
   }
 #endif
 #ifdef DEXCOM
+  static constexpr std::string_view manualDexcomPrefix =
+      "JUGGLUCO-MANUAL-G7:";
+
+  static bool isManualDexcomPayload(std::string_view payload) {
+    return payload.size() == 55 &&
+           payload.substr(0, manualDexcomPrefix.size()) == manualDexcomPrefix;
+  }
+
+  sensor *findActiveManualDexcom(const char *pin) {
+    for (int index = last(); index >= 0; --index) {
+      sensor *candidate = getsensor(index);
+      if (!candidate->present || candidate->finished)
+        continue;
+      SensorGlucoseData *data = getSensorData(index);
+      if (!data || !data->isDexcom())
+        continue;
+      const auto *info = data->getinfo();
+      if (!info || info->siIdlen != 55 ||
+          memcmp(info->siId, manualDexcomPrefix.data(),
+                 manualDexcomPrefix.size()))
+        continue;
+      const auto storedPin = data->getDexPin();
+      if (!memcmp(storedPin.data(), pin, storedPin.size()))
+        return candidate;
+    }
+    return nullptr;
+  }
+
   std::pair<int, SensorGlucoseData *>
   makeDexComSensorindex(const char *pin, std::string_view gegs, uint32_t now) {
     std::array<char, 16> name;
@@ -661,8 +689,14 @@ public:
     std::copy_n(pin, 4, name.data() + 12);
     LOGGER("makeDexComSensorindex %s name=%.16s\n", pin, name.data());
     removeunused();
-    if (sensor *sensgegs =
-            findsensorm(std::string_view(name.data(), name.size()))) {
+    sensor *sensgegs = findsensorm(std::string_view(name.data(), name.size()));
+    if (!sensgegs && isManualDexcomPayload(gegs)) {
+      sensgegs = findActiveManualDexcom(pin);
+      if (sensgegs)
+        LOGGER("manual Dexcom retry uses active sensor %s\n",
+               sensgegs->showsensorname());
+    }
+    if (sensgegs) {
       LOGGER("known sensor %s\n", sensgegs->showsensorname());
       const int sensindex = sensgegs - sensorlist();
       SensorGlucoseData *sens = getSensorData(sensindex);

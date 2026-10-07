@@ -1,15 +1,17 @@
 package tk.glucodata;
 
-import java.util.Locale;
-import java.util.concurrent.atomic.AtomicLong;
+import java.security.SecureRandom;
+import java.util.Random;
 
 /** Builds a scan-compatible payload for a manually entered Dexcom G7 pairing code. */
 public final class DexcomManualPairing {
     private static final String MANUAL_PAYLOAD_PREFIX = "JUGGLUCO-MANUAL-G7:";
     private static final String MANUAL_PAYLOAD_PADDING = "00000000000000000";
     private static final String DEXCOM_PAIRING_MARKER = "240";
+    private static final String SENSOR_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static final int PAIRING_CODE_LENGTH = 4;
-    private static final AtomicLong lastPayloadNonce = new AtomicLong(System.currentTimeMillis());
+    private static final int SENSOR_ID_RANDOM_LENGTH = 11;
+    private static final SecureRandom sensorIdRandom = new SecureRandom();
 
     private DexcomManualPairing() {
     }
@@ -37,28 +39,46 @@ public final class DexcomManualPairing {
 
     /**
      * Returns a payload accepted by the existing native QR parser, or {@code null} for invalid
-     * input. The generated sensor ID is intentionally unique: a future sensor may legitimately
-     * reuse the same four-digit PIN and must not reopen an older sensor record.
+     * input. Native pairing reuses an unfinished manual record with the same PIN for retries; a
+     * genuinely new sensor receives a random, clock-independent identity here so clock rollback
+     * cannot make it reopen an older record.
      */
     public static String createScanPayload(String rawCode) {
-        final long nonce = lastPayloadNonce.updateAndGet(previous ->
-                Math.max(System.currentTimeMillis(), previous + 1L));
-        return createScanPayload(rawCode, nonce);
+        return createScanPayload(rawCode, createSensorId(sensorIdRandom));
     }
 
-    static String createScanPayload(String rawCode, long nonce) {
+    static String createScanPayload(String rawCode, String sensorId) {
         final String code = normalizePairingCode(rawCode);
-        if (!isValidPairingCode(code) || nonce < 0L) {
+        if (!isValidPairingCode(code) || !isValidSensorId(sensorId)) {
             return null;
         }
 
-        final String encodedNonce = Long.toUnsignedString(nonce, 36).toUpperCase(Locale.ROOT);
-        final String sensorId = ("00000000000" + encodedNonce);
-        final String fixedSensorId = "M" + sensorId.substring(sensorId.length() - 11);
         return MANUAL_PAYLOAD_PREFIX
-                + fixedSensorId
+                + sensorId
                 + MANUAL_PAYLOAD_PADDING
                 + DEXCOM_PAIRING_MARKER
                 + code;
+    }
+
+    static String createSensorId(Random random) {
+        final StringBuilder sensorId = new StringBuilder(1 + SENSOR_ID_RANDOM_LENGTH);
+        sensorId.append('M');
+        for (int index = 0; index < SENSOR_ID_RANDOM_LENGTH; index++) {
+            sensorId.append(SENSOR_ID_ALPHABET.charAt(random.nextInt(SENSOR_ID_ALPHABET.length())));
+        }
+        return sensorId.toString();
+    }
+
+    private static boolean isValidSensorId(String sensorId) {
+        if (sensorId == null || sensorId.length() != 1 + SENSOR_ID_RANDOM_LENGTH
+                || sensorId.charAt(0) != 'M') {
+            return false;
+        }
+        for (int index = 1; index < sensorId.length(); index++) {
+            if (SENSOR_ID_ALPHABET.indexOf(sensorId.charAt(index)) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 }
