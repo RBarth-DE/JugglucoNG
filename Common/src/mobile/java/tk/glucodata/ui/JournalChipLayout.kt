@@ -11,10 +11,17 @@ internal data class JournalChipSlot(val side: Int, val lift: Int, val nudge: Int
 }
 
 /**
+ * A chip tucked into a deck behind the chip at [front], an index into this frame's requests.
+ * The deck fans [direction]: -1 up, 1 down, or 0 straight behind when neither has room.
+ */
+internal data class JournalChipTuck(val front: Int, val direction: Int)
+
+/**
  * One chip to place: its entry's x, the top it would like, its width, and where it sat last
- * frame. Chips with the same [stackKey], such as a loop's repeated doses of one size, may tuck
- * behind one another. A chip with [foldInto] set is too close to that earlier chip to tell
- * apart on screen, so it hides behind it rather than taking a spot of its own.
+ * frame, either a [previous] spot of its own or a [previousTuck] in a deck. Chips with the same
+ * [stackKey], such as a loop's repeated doses of one size, may tuck behind one another. A chip
+ * with [foldInto] set is too close to that earlier chip to tell apart on screen, so it hides
+ * wholly behind it rather than taking a spot of its own.
  */
 internal data class JournalChipRequest(
     val anchorX: Float,
@@ -22,7 +29,8 @@ internal data class JournalChipRequest(
     val width: Float,
     val previous: JournalChipSlot?,
     val stackKey: Any? = null,
-    val foldInto: Int? = null
+    val foldInto: Int? = null,
+    val previousTuck: JournalChipTuck? = null
 )
 
 /** How far each member of an opened pile moves, as `dx` and `dy` pairs, and which found no clear spot. */
@@ -31,9 +39,9 @@ internal class JournalChipSpread(val shifts: Array<FloatArray>, val stuck: Boole
 }
 
 /**
- * The spot a chip was given. [front] is the chip it sits behind, or its own index when nothing
- * covers it; [depth] is how many layers down it sits, 0 being on top. [crowded] chips overlap
- * because no spot was free; [folded] ones hide wholly behind their front.
+ * The spot a chip was given. [front] is the chip whose pile it belongs to, its own index when it
+ * leads; [depth] is how many layers down it sits, 0 being on top. A chip in a deck has [tuck]
+ * set. [crowded] chips had no free spot; [folded] ones hide wholly behind the chip they fold into.
  */
 internal data class JournalChipPlacement(
     val slot: JournalChipSlot,
@@ -41,7 +49,8 @@ internal data class JournalChipPlacement(
     val crowded: Boolean,
     val front: Int,
     val depth: Int,
-    val folded: Boolean = false
+    val folded: Boolean = false,
+    val tuck: JournalChipTuck? = null
 )
 
 /**
@@ -54,10 +63,11 @@ internal data class JournalChipPlacement(
  * the chart forgets those spots when the zoom settles, so the layout then tidies up.
  *
  * Chips whose value appears only once nearby claim the free room first. A chip repeating a
- * neighbour's value may then tuck behind it, a little offset so its edge still shows, rather
- * than climbing the chart; a pile holds a few at most. Only when no spot is free does a chip
- * overlap a different one. Piles whose chips hide a label spread apart, in whatever direction
- * has room, while tapped or hovered.
+ * nearby value may instead tuck into a deck behind it rather than climbing the chart, a few at
+ * most; a chip with no free spot at all joins the deck of the nearest chip in its way. A deck
+ * fans a few dp up, or down where up has no room, the way it spreads apart when tapped or
+ * hovered. Each chip remembers which deck it joined, so fronts and layers hold still while
+ * panning.
  */
 internal object JournalChipLayout {
 
@@ -75,12 +85,14 @@ internal object JournalChipLayout {
         val maxLift: Int = 10,
         val maxDrop: Int = 3,
         val maxNudge: Int = 4,
-        /** How far apart, across or down, chips tucked together must sit so each one's edge shows. */
+        /** How far each layer of a deck shows past the one in front of it. */
         val peek: Float = 0f,
         /** How close two chips with the same value must be for either to count as a repeat. */
         val repeatReach: Float = 0f,
-        /** The most chips one pile holds, its front included. */
-        val maxStack: Int = 4
+        /** The most chips a deck of repeats holds, its front included. */
+        val maxStack: Int = 4,
+        /** How many layers behind its front a deck shows; deeper ones hide behind the last. */
+        val visibleLayers: Int = 2
     )
 
     // Costs, in rows of movement: a lift is the yardstick, a drop costs a little more, the
@@ -93,16 +105,19 @@ internal object JournalChipLayout {
     private const val NUDGE_COST_PER_ROW = 1.2f
     private const val OFF_SCREEN_COST_PER_ROW = 3f
     private const val KEEP_DISCOUNT = 1f
-    // Tucking behind a twin is cheaper than climbing a row, but a free spot beside it still wins.
+    // Tucking behind a twin close by is cheaper than climbing a row or crossing to the other
+    // side, so repeats share room instead of taking more of the chart.
     private const val TUCK_COST = 0.4f
-    private const val CLEAR = -1
+    private const val UNSET = 2
+    private const val KEEP_SLACK = 1f
 
     /**
-     * Places [requests], which come in time order. Chips keeping last frame's spot go first,
-     * then chips that had to leave theirs, then chips new to the chart, so nothing on screen
-     * is pushed about by a chip scrolling in. Within each pass, chips whose value is unique
-     * nearby go before repeats, and earlier entries before later ones. [obstacles], such as the
-     * entries' own dots, are kept clear like placed chips. The result lines up with [requests].
+     * Places [requests], which come in time order. Chips keeping last frame's spot or deck go
+     * first, then chips that had to leave theirs, then chips new to the chart, so nothing on
+     * screen is pushed about by a chip scrolling in. Within each pass, chips whose value is
+     * unique nearby go before repeats, and earlier entries before later ones. [obstacles], such
+     * as the entries' own dots, are kept clear like placed chips. The result lines up with
+     * [requests].
      */
     fun place(
         requests: List<JournalChipRequest>,
@@ -114,63 +129,83 @@ internal object JournalChipLayout {
         val slots = slotsFor(spec)
         val folded = requests.indices.filter { requests[it].foldInto != null }.toHashSet()
         // First every chip that can keep last frame's spot does, outright, while that spot is
-        // still open to it and on screen, or while its entry has yet to scroll in from the
-        // right, so it slides in steadily rather than hunting for a spot each frame. Only the
-        // chips that must move look for a new spot, and only among the open ones, so one
-        // chip's move can never push another about.
+        // still free and on screen, or while its entry has yet to scroll in from the right, so
+        // it slides in steadily rather than hunting for a spot each frame. Then every chip that
+        // can rejoin last frame's deck does, in the same layer order. Only the chips that must
+        // move look for a new spot, so one chip's move can never push another about.
         requests.forEachIndexed { index, request ->
-            if (index in folded) return@forEachIndexed
+            if (index in folded || request.previousTuck != null) return@forEachIndexed
             val previous = request.previous ?: return@forEachIndexed
             val box = boxFor(request, previous, spec) ?: return@forEachIndexed
             if (request.anchorX <= spec.maxX && offScreenOf(request, box, spec) != 0f) return@forEachIndexed
-            val pile = layout.fitOf(index, box) ?: return@forEachIndexed
-            layout.commit(index, previous, box, pile)
+            // A pixel of slack, so chips placed exactly a gap apart are not torn apart by the
+            // rounding of a pan.
+            if (!layout.isFree(box, spec.gap - KEEP_SLACK)) return@forEachIndexed
+            layout.commit(index, previous, box)
         }
-        val displaced = requests.indices.filter { it !in folded && layout.placements[it] == null && requests[it].previous != null }
-        val fresh = requests.indices.filter { it !in folded && requests[it].previous == null }
-        val order = displaced.sortedBy { layout.repeats[it] } + fresh.sortedBy { layout.repeats[it] }
-        // Once the chart is this full, so many chips have nowhere free that weighing every
-        // overlap for each would stall panning; later ones still take any free spot there is,
-        // but with none, overlap at the nearest spot on the chart without weighing how much.
-        var crowdedCount = 0
+        requests.forEachIndexed { index, request ->
+            if (index in folded) return@forEachIndexed
+            val tuck = request.previousTuck ?: return@forEachIndexed
+            if (!layout.mayJoin(index, tuck.front)) return@forEachIndexed
+            val box = layout.deckBoxFor(index, tuck.front, tuck.direction) ?: return@forEachIndexed
+            layout.commitTuck(index, tuck.front, box)
+        }
+        val unplaced = requests.indices.filter { it !in folded && layout.placements[it] == null }
+        val (fresh, displaced) = unplaced.partition { requests[it].previous == null && requests[it].previousTuck == null }
+        // Chips that had a spot of their own go before chips that were in a deck, so a deck
+        // whose front had to move finds it already settled and follows it.
+        val (displacedTucks, displacedSpots) = displaced.partition { requests[it].previousTuck != null }
+        val order = displacedSpots.sortedBy { layout.repeats[it] } + displacedTucks + fresh.sortedBy { layout.repeats[it] }
         order.forEach { index ->
-            val saturated = crowdedCount >= CROWDED_SEARCH_BUDGET
             val request = requests[index]
             var bestSlot: JournalChipSlot? = null
             var bestBox: JournalChipBox? = null
-            var bestPile = CLEAR
+            var bestFront = -1
             var bestCost = Float.POSITIVE_INFINITY
+            // A deck to tuck into: last frame's, or a twin's close by.
+            fun considerDeck(front: Int, discount: Float) {
+                if (!layout.mayJoin(index, front) || !layout.withinTuckReach(index, front)) return
+                val cost = layout.tuckCost(index, front) - discount
+                if (cost >= bestCost) return
+                val box = layout.deckBoxFor(index, front, request.previousTuck?.takeIf { it.front == front }?.direction) ?: return
+                bestSlot = null
+                bestBox = box
+                bestFront = front
+                bestCost = cost
+            }
+            // Last frame's deck, wherever its front has gone, even into another deck.
+            request.previousTuck?.let { tuck ->
+                val lead = layout.placements[tuck.front]
+                considerDeck(if (lead != null && lead.tuck != null) lead.front else tuck.front, KEEP_DISCOUNT)
+            }
+            if (layout.repeats[index]) layout.twinFrontsOf(index).forEach { considerDeck(it, 0f) }
             fun consider(slot: JournalChipSlot) {
                 val box = boxFor(request, slot, spec) ?: return
                 if (leavesChart(request, box, spec)) return
-                var cost = costOf(request, slot, box, spec)
-                if (cost >= bestCost) return
-                val pile = layout.fitOf(index, box) ?: return
-                if (pile != CLEAR) cost += TUCK_COST
-                if (cost < bestCost) {
-                    bestSlot = slot
-                    bestBox = box
-                    bestPile = pile
-                    bestCost = cost
-                }
+                val cost = costOf(request, slot, box, spec)
+                if (cost >= bestCost || !layout.isFree(box)) return
+                bestSlot = slot
+                bestBox = box
+                bestFront = -1
+                bestCost = cost
             }
-            // Last frame's spot first: it is usually still open and still the cheapest.
+            // Last frame's spot first: it is usually still free and still the cheapest.
             request.previous?.let(::consider)
-            // Then the rest, nearest first. Going off screen or tucking only adds cost, so once
-            // a spot's base cost alone is no better than the best found, nothing further can be.
+            // Then the rest, nearest first. Going off screen only adds cost, so once a spot's
+            // base cost alone is no better than the best found, nothing further can be.
             for ((slot, baseCost) in slots) {
                 if (baseCost >= bestCost) break
                 if (slot != request.previous) consider(slot)
             }
-            val slot = bestSlot
             val box = bestBox
-            if (slot != null && box != null) {
-                layout.commit(index, slot, box, bestPile)
-            } else {
-                crowdedPlacement(index, request, slots, spec, layout, weighOverlap = !saturated)
-                crowdedCount++
+            val slot = bestSlot
+            when {
+                box != null && slot != null -> layout.commit(index, slot, box)
+                box != null -> layout.commitTuck(index, bestFront, box)
+                else -> crowdedPlacement(index, request, slots, spec, layout)
             }
         }
+        layout.orderDecks()
         // A folded chip hides wholly behind the chip it folds into, one layer under that pile.
         folded.sorted().forEach { index ->
             val host = layout.placements[requests[index].foldInto!!] ?: return@forEach
@@ -195,43 +230,148 @@ internal object JournalChipLayout {
         val grid = BoxGrid(columnWidth = (spec.rowStep * 2f).coerceAtLeast(1f))
         val placements = arrayOfNulls<JournalChipPlacement>(requests.size)
         val pileSizes = IntArray(requests.size)
+        val deckDirections = IntArray(requests.size) { UNSET }
         val repeats = repeatsOf(requests, spec.repeatReach)
+        private val frontsByKey = HashMap<Any, MutableList<Int>>()
 
-        /**
-         * Whether [box] is open to chip [index]: null if it is blocked, [CLEAR] if it touches no
-         * chip, or the front of the pile it would tuck into. Only a repeat may tuck, only behind
-         * chips with its own value, only into a single pile that has room, overlapping that
-         * pile's front, and only far enough from each chip there that its edge still shows.
-         */
-        fun fitOf(index: Int, box: JournalChipBox): Int? {
-            val key = requests[index].stackKey
-            val mayTuck = key != null && repeats[index]
-            var pile = CLEAR
-            var touchesFront = false
-            grid.forEachNear(box, spec.gap) { owner, other ->
-                if (!within(box, other, spec.gap)) return@forEachNear
-                if (!mayTuck || owner == OBSTACLE || requests[owner].stackKey != key) return null
-                // Twins may sit closer than the usual gap.
-                if (!within(box, other, 0f)) return@forEachNear
-                if (kotlin.math.abs(box.left - other.left) < spec.peek && kotlin.math.abs(box.top - other.top) < spec.peek) return null
-                val ownerPile = placements[owner]!!.front
-                if (pile != CLEAR && pile != ownerPile) return null
-                pile = ownerPile
-                if (owner == ownerPile) touchesFront = true
-            }
-            if (pile == CLEAR) return CLEAR
-            if (!touchesFront || pileSizes[pile] >= spec.maxStack) return null
-            return pile
+        /** Whether [box] keeps [gap] from every chip and obstacle placed so far. */
+        fun isFree(box: JournalChipBox, gap: Float = spec.gap): Boolean {
+            grid.forEachNear(box, spec.gap) { _, other -> if (within(box, other, gap)) return false }
+            return true
         }
 
-        fun commit(index: Int, slot: JournalChipSlot, box: JournalChipBox, pile: Int, crowded: Boolean = false, depth: Int? = null) {
-            val front = if (pile == CLEAR) index else pile
+        /**
+         * Whether chip [index] may join the deck led by [front]: the front must lead its own
+         * pile. A repeat joins only a deck of its own value with room; any other chip, having
+         * found no free spot, may join any deck.
+         */
+        fun mayJoin(index: Int, front: Int): Boolean {
+            val lead = placements.getOrNull(front) ?: return false
+            if (lead.front != front || lead.folded) return false
+            val key = requests[index].stackKey
+            return if (key != null && key == requests[front].stackKey) {
+                pileSizes[front] < spec.maxStack
+            } else {
+                true
+            }
+        }
+
+        // Fronts with the same value whose entries sit close enough for chip [index] to join.
+        fun twinFrontsOf(index: Int): List<Int> {
+            val key = requests[index].stackKey ?: return emptyList()
+            val anchorX = requests[index].anchorX
+            return frontsByKey[key].orEmpty().filter { kotlin.math.abs(requests[it].anchorX - anchorX) <= spec.repeatReach }
+        }
+
+        // Whether [front]'s deck sits close enough to where chip [index] would hang on its own
+        // to tuck into, so no chip joins a deck far from its entry.
+        fun withinTuckReach(index: Int, front: Int): Boolean {
+            val request = requests[index]
+            val deck = placements[front]!!.box
+            val ownLeft = request.anchorX + spec.sideOffset
+            val ownRight = request.anchorX - spec.sideOffset
+            val reach = spec.repeatReach / 2f
+            return deck.left <= ownLeft + reach && deck.right >= ownRight - reach
+        }
+
+        // What joining [front]'s deck costs chip [index], in the same rows as a spot: the tuck
+        // itself, plus how far the deck sits from where the chip would hang on its own, sideways
+        // at half a nudge's rate, so a twin a little way along still stacks rather than spreads.
+        fun tuckCost(index: Int, front: Int): Float {
+            val request = requests[index]
+            val deck = placements[front]!!.box
+            val ownLeft = request.anchorX + spec.sideOffset
+            val ownTop = request.baseTop.coerceIn(spec.minTop, maxOf(spec.maxTop, request.baseTop))
+            val across = kotlin.math.abs(deck.left - ownLeft) / spec.rowStep * NUDGE_COST_PER_ROW * 0.5f
+            val rows = (deck.top - ownTop) / spec.rowStep
+            val down = if (rows >= 0f) rows * DROP_COST else -rows * LIFT_COST
+            return TUCK_COST + across + down
+        }
+
+        /**
+         * Where chip [index] would sit in [front]'s deck, or null if that would take it off the
+         * chart while its entry is on screen. The deck fans the way it already does, else
+         * [preferred], else up, else down, whichever keeps its visible layers clear of other
+         * chips and on the chart; with neither, layers sit straight behind the front. A layer
+         * deeper than the deck shows, or with no room, hides behind the last one that fits.
+         */
+        fun deckBoxFor(index: Int, front: Int, preferred: Int?): JournalChipBox? {
+            val direction = deckDirections[front].takeIf { it != UNSET }
+                ?: listOfNotNull(preferred?.takeIf { it != 0 }, -1, 1).firstOrNull { layersFit(front, it, requests[index].width) }
+                ?: 0
+            var layer = minOf(pileSizes[front], spec.visibleLayers)
+            var box = layerBox(front, layer, direction, requests[index].width)
+            while (layer > 0 && !layerFits(front, box)) {
+                layer--
+                box = layerBox(front, layer, direction, requests[index].width)
+            }
+            if (leavesChart(requests[index], box, spec)) return null
+            return box
+        }
+
+        private fun layerBox(front: Int, layer: Int, direction: Int, width: Float): JournalChipBox {
+            val lead = placements[front]!!.box
+            val top = lead.top + direction * layer * spec.peek
+            return JournalChipBox(lead.left, top, lead.left + width, top + (lead.bottom - lead.top))
+        }
+
+        private fun layersFit(front: Int, direction: Int, width: Float): Boolean =
+            (1..spec.visibleLayers).all { layerFits(front, layerBox(front, it, direction, width)) }
+
+        // A visible layer stays on the chart and off every chip outside its deck.
+        private fun layerFits(front: Int, box: JournalChipBox): Boolean {
+            val lead = placements[front]!!.box
+            if (box.top < spec.minTop || box.top > maxOf(spec.maxTop, lead.top)) return false
+            grid.forEachNear(box, 0f) { owner, other ->
+                if (owner != OBSTACLE && placements[owner]?.front == front) return@forEachNear
+                if (within(box, other, 0f)) return false
+            }
+            return true
+        }
+
+        /**
+         * Puts every deck's layers in time order, earliest nearest the front, whatever order
+         * its chips joined in, so two chips never trade layers from one frame to the next.
+         */
+        fun orderDecks() {
+            val members = placements.indices.filter { placements[it]?.tuck != null }.groupBy { placements[it]!!.front }
+            members.values.forEach { deck ->
+                if (deck.size < 2) return@forEach
+                val layers = deck.map { placements[it]!! }.sortedBy { it.depth }
+                deck.sorted().forEachIndexed { position, index ->
+                    val layer = layers[position]
+                    val box = layer.box
+                    placements[index] = placements[index]!!.copy(
+                        box = JournalChipBox(box.left, box.top, box.left + requests[index].width, box.bottom),
+                        depth = layer.depth
+                    )
+                }
+            }
+        }
+
+        fun commit(index: Int, slot: JournalChipSlot, box: JournalChipBox, crowded: Boolean = false) {
+            placements[index] = JournalChipPlacement(slot, box, crowded, front = index, depth = 0)
+            pileSizes[index] = 1
+            grid.add(box, index)
+            requests[index].stackKey?.let { frontsByKey.getOrPut(it) { ArrayList() }.add(index) }
+        }
+
+        fun commitTuck(index: Int, front: Int, box: JournalChipBox, crowded: Boolean = false) {
+            val lead = placements[front]!!
+            val direction = when {
+                deckDirections[front] != UNSET -> deckDirections[front]
+                box.top < lead.box.top -> -1
+                box.top > lead.box.top -> 1
+                else -> 0
+            }
+            if (deckDirections[front] == UNSET && direction != 0) deckDirections[front] = direction
             placements[index] = JournalChipPlacement(
-                slot = slot,
+                slot = lead.slot,
                 box = box,
                 crowded = crowded,
                 front = front,
-                depth = depth ?: if (pile == CLEAR) 0 else pileSizes[front]
+                depth = pileSizes[front],
+                tuck = JournalChipTuck(front, deckDirections[front].takeIf { it != UNSET } ?: 0)
             )
             pileSizes[front]++
             grid.add(box, index)
@@ -260,80 +400,53 @@ internal object JournalChipLayout {
     private fun within(a: JournalChipBox, b: JournalChipBox, gap: Float): Boolean =
         a.left - gap < b.right && b.left < a.right + gap && a.top - gap < b.bottom && b.top < a.bottom + gap
 
-    // With no open spot, the chip overlaps: of the nearest spots, and last frame's, it takes
-    // the one that hides the least, cost included. Last frame's spot is favoured strongly, so
-    // a crowded chip holds still while panning instead of hopping between equal overlaps.
-    // Without [weighOverlap], it takes the cheapest of those spots by cost alone, which still
-    // keeps it on the chart. It goes behind what it overlaps, joining the pile of the chip it
-    // covers most.
+    // With no free spot, the chip joins a deck: of the nearest spots, and last frame's, it
+    // takes the cheapest one that some chip already covers, and tucks behind that chip's front.
+    // Only when no deck will have it does it simply overlap where it would hang.
     private fun crowdedPlacement(
         index: Int,
         request: JournalChipRequest,
         slots: List<Pair<JournalChipSlot, Float>>,
         spec: Spec,
-        layout: Layout,
-        weighOverlap: Boolean = true
+        layout: Layout
     ) {
-        var chosenSlot: JournalChipSlot? = null
-        var chosenBox: JournalChipBox? = null
-        var chosenCost = Float.POSITIVE_INFINITY
-        fun consider(slot: JournalChipSlot, bonus: Float) {
-            val box = boxFor(request, slot, spec) ?: return
-            if (leavesChart(request, box, spec)) return
-            var cost = costOf(request, slot, box, spec) - bonus
-            if (cost >= chosenCost) return
-            if (weighOverlap) {
-                // Capped at the chip's own area: once a spot is wholly covered, more layers
-                // under it hide nothing more, and must not outweigh hanging off the chart.
-                val ownArea = (box.right - box.left + 2f * spec.gap) * (box.bottom - box.top + 2f * spec.gap)
-                cost += minOf(layout.grid.overlapArea(box, spec.gap), ownArea) / (spec.chipHeight * spec.rowStep)
-            }
-            if (cost < chosenCost) {
-                chosenSlot = slot
-                chosenBox = box
-                chosenCost = cost
-            }
-        }
-        request.previous?.let { consider(it, CROWDED_KEEP_BONUS) }
-        var tried = 0
+        val candidates = ArrayList<JournalChipSlot>(CROWDED_CANDIDATES + 1)
+        request.previous?.let(candidates::add)
         for ((slot, _) in slots) {
-            if (tried >= CROWDED_CANDIDATES) break
-            if (boxFor(request, slot, spec) == null) continue
-            tried++
-            consider(slot, 0f)
+            if (candidates.size > CROWDED_CANDIDATES) break
+            if (slot != request.previous && boxFor(request, slot, spec) != null) candidates.add(slot)
         }
-        // With nothing in reach on the chart, the chip hangs on whichever side of its entry
-        // leaves the chart least.
-        val fallback = chosenSlot ?: listOf(JournalChipSlot.Preferred, JournalChipSlot(side = -1, lift = 0, nudge = 0))
-            .minBy { offScreenOf(request, boxFor(request, it, spec, clamp = true)!!, spec) }
-        val slot = fallback
-        val box = chosenBox ?: boxFor(request, fallback, spec, clamp = true)!!
-        var covered = OBSTACLE
-        var coveredArea = 0f
-        var depth = 0
-        layout.grid.forEachNear(box, 0f) { owner, other ->
-            if (owner == OBSTACLE) return@forEachNear
-            val area = overlapOf(box, other)
-            if (area <= 0f) return@forEachNear
-            depth = maxOf(depth, layout.placements[owner]!!.depth + 1)
-            if (area > coveredArea) {
-                covered = owner
-                coveredArea = area
+        var bestFront = -1
+        var bestDeck: JournalChipBox? = null
+        var bestCost = Float.POSITIVE_INFINITY
+        for (slot in candidates) {
+            val box = boxFor(request, slot, spec) ?: continue
+            if (leavesChart(request, box, spec)) continue
+            val cost = costOf(request, slot, box, spec)
+            if (cost >= bestCost) continue
+            var front = -1
+            layout.grid.forEachNear(box, 0f) { owner, other ->
+                if (front < 0 && owner != OBSTACLE && within(box, other, 0f)) front = layout.placements[owner]!!.front
             }
+            if (front < 0 || !layout.mayJoin(index, front) || !layout.withinTuckReach(index, front)) continue
+            val deck = layout.deckBoxFor(index, front, null) ?: continue
+            bestFront = front
+            bestDeck = deck
+            bestCost = cost
         }
-        val pile = if (covered == OBSTACLE) CLEAR else layout.placements[covered]!!.front
-        layout.commit(index, slot, box, pile, crowded = true, depth = depth)
-    }
-
-    private fun overlapOf(a: JournalChipBox, b: JournalChipBox): Float {
-        val width = minOf(a.right, b.right) - maxOf(a.left, b.left)
-        val height = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-        return if (width > 0f && height > 0f) width * height else 0f
+        val deck = bestDeck
+        if (deck != null) {
+            layout.commitTuck(index, bestFront, deck, crowded = true)
+            return
+        }
+        // With no deck in reach, the chip hangs on whichever side of its entry leaves the chart
+        // least.
+        val slot = listOf(JournalChipSlot.Preferred, JournalChipSlot(side = -1, lift = 0, nudge = 0))
+            .minBy { offScreenOf(request, boxFor(request, it, spec, clamp = true)!!, spec) }
+        layout.commit(index, slot, boxFor(request, slot, spec, clamp = true)!!, crowded = true)
     }
 
     private const val CROWDED_CANDIDATES = 24
-    private const val CROWDED_SEARCH_BUDGET = 32
-    private const val CROWDED_KEEP_BONUS = 2f
 
     // Every spot a chip may take, with its base cost, cheapest first.
     private fun slotsFor(spec: Spec): List<Pair<JournalChipSlot, Float>> {
@@ -378,10 +491,15 @@ internal object JournalChipLayout {
         return cost
     }
 
-    // A chip whose entry is on screen stays wholly on the chart; one whose entry has left, or
-    // has yet to arrive, may hang off with it.
-    private fun leavesChart(request: JournalChipRequest, box: JournalChipBox, spec: Spec): Boolean =
-        request.anchorX >= spec.minX && request.anchorX <= spec.maxX && offScreenOf(request, box, spec) > 0f
+    // A chip whose entry is on screen stays wholly on the chart; one whose entry has left may
+    // hang off with it. One whose entry has yet to arrive from the right may not hang to the
+    // right of it, since that spot would leave the chart the moment the entry arrives; it waits
+    // to the left instead, already where it will stay.
+    private fun leavesChart(request: JournalChipRequest, box: JournalChipBox, spec: Spec): Boolean = when {
+        request.anchorX < spec.minX -> false
+        request.anchorX > spec.maxX -> box.left > request.anchorX
+        else -> offScreenOf(request, box, spec) > 0f
+    }
 
     // How far a chip hangs off the screen, as far as it matters. Past the right edge always
     // counts, so a chip scrolling in from the right arrives already hung to the left of its
@@ -422,31 +540,13 @@ internal object JournalChipLayout {
         }
 
         fun columnEntries(column: Int): List<Int>? = columns[column]
-
-        /** Area of [box], widened by [gap], that already-placed chips cover. */
-        fun overlapArea(box: JournalChipBox, gap: Float): Float {
-            var area = 0f
-            val range = columnsOf(box.left - gap, box.right + gap)
-            for (column in range) {
-                columns[column]?.forEach { entry ->
-                    val other = boxes[entry]
-                    // A wide chip sits in several columns; count it once, in the first shared one.
-                    val firstShared = maxOf(kotlin.math.floor(other.left / columnWidth).toInt(), range.first)
-                    if (column != firstShared) return@forEach
-                    val width = minOf(box.right + gap, other.right) - maxOf(box.left - gap, other.left)
-                    val height = minOf(box.bottom + gap, other.bottom) - maxOf(box.top - gap, other.top)
-                    if (width > 0f && height > 0f) area += width * height
-                }
-            }
-            return area
-        }
     }
 
     /**
      * The piles in which some chip's label is hidden: each starts with its front, then the
-     * chips hidden behind it, top layer first. A chip counts as hidden when it is folded, or
-     * when a chip above it in its pile covers more than [minOverlapX] across and [minOverlapY]
-     * down, so an edge that merely peeks out from behind its twin does not count.
+     * chips hidden behind it, top layer first. A chip in a deck or folded away is hidden by
+     * design; any other member counts only when a chip above it in its pile covers more than
+     * [minOverlapX] across and [minOverlapY] down.
      */
     fun piles(placements: List<JournalChipPlacement>, minOverlapX: Float, minOverlapY: Float): List<IntArray> {
         val members = placements.indices.groupBy { placements[it].front }
@@ -456,7 +556,7 @@ internal object JournalChipLayout {
             val hidden = pile.filter { index ->
                 if (index == front) return@filter false
                 val placement = placements[index]
-                placement.folded || pile.any { other ->
+                placement.folded || placement.tuck != null || pile.any { other ->
                     val above = placements[other]
                     other != index && above.depth < placement.depth &&
                         minOf(above.box.right, placement.box.right) - maxOf(above.box.left, placement.box.left) > minOverlapX &&

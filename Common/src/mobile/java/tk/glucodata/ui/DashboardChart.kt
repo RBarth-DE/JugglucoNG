@@ -3517,7 +3517,7 @@ fun InteractiveGlucoseChart(
                 maxX = overlayDataWidthPx,
                 minTop = journalChipMinTopPx + journalChipPillInsetYPx,
                 maxTop = journalChipMaxTopPx + journalChipPillInsetYPx,
-                peek = with(LocalDensity.current) { 8.dp.toPx() },
+                peek = with(LocalDensity.current) { 5.dp.toPx() },
                 repeatReach = journalChipChromePx + journalChipMaxTextPx
             )
 
@@ -3557,6 +3557,9 @@ fun InteractiveGlucoseChart(
                 journalChipLayoutZoom = visibleDuration
             }
             val journalChipLastSlots = remember(journalChipLayoutZoom) { HashMap<Long, JournalChipSlot>() }
+            // Which chip's deck each chip joined, and which way the deck fans, so fronts and
+            // layers hold still from frame to frame.
+            val journalChipLastTucks = remember(journalChipLayoutZoom) { HashMap<Long, Pair<Long, Int>>() }
             val chipLabels = chipMarkers.map { marker -> marker.detailText.ifBlank { marker.title.take(10) } }
             val chipWidths = chipLabels.map { label ->
                 // A pixel of slack so a chip laid out at its measured width never ellipsizes.
@@ -3583,6 +3586,8 @@ fun InteractiveGlucoseChart(
                     }
                 }
             }
+            val chipIndexOfEntry = HashMap<Long, Int>(chipMarkers.size * 2)
+            chipMarkers.forEachIndexed { index, marker -> chipIndexOfEntry[marker.entryId] = index }
             val chipPlacements = JournalChipLayout.place(
                 chipMarkers.mapIndexed { index, marker ->
                     JournalChipRequest(
@@ -3592,7 +3597,10 @@ fun InteractiveGlucoseChart(
                         previous = journalChipLastSlots[marker.entryId],
                         // Chips showing the same thing may tuck behind one another.
                         stackKey = marker.type to chipLabels[index],
-                        foldInto = chipFoldInto[index]
+                        foldInto = chipFoldInto[index],
+                        previousTuck = journalChipLastTucks[marker.entryId]?.let { (frontId, direction) ->
+                            chipIndexOfEntry[frontId]?.let { JournalChipTuck(it, direction) }
+                        }
                     )
                 },
                 journalChipLayoutSpec,
@@ -3605,15 +3613,30 @@ fun InteractiveGlucoseChart(
                     JournalChipBox(x - journalChipDotClearPx, dotY - journalChipDotClearPx, x + journalChipDotClearPx, dotY + journalChipDotClearPx)
                 }
             )
-            if (journalChipLastSlots.size > chipMarkers.size * 2 + 64) journalChipLastSlots.clear()
+            if (journalChipLastSlots.size + journalChipLastTucks.size > chipMarkers.size * 2 + 64) {
+                journalChipLastSlots.clear()
+                journalChipLastTucks.clear()
+            }
             chipMarkers.forEachIndexed { index, marker ->
-                if (!chipPlacements[index].folded) journalChipLastSlots[marker.entryId] = chipPlacements[index].slot
+                val placement = chipPlacements[index]
+                val tuck = placement.tuck
+                when {
+                    placement.folded -> Unit
+                    tuck != null -> {
+                        journalChipLastTucks[marker.entryId] = chipMarkers[tuck.front].entryId to tuck.direction
+                        journalChipLastSlots.remove(marker.entryId)
+                    }
+                    else -> {
+                        journalChipLastSlots[marker.entryId] = placement.slot
+                        journalChipLastTucks.remove(marker.entryId)
+                    }
+                }
             }
             val chipBoxes = chipPlacements.map { it.box }
 
-            // Where chips overlap, a repeat tucked behind its twin or a chip with no free spot,
-            // and a label is hidden, the pile's front shows how many chips it holds. The pile
-            // spreads apart, in whatever direction has room, while tapped or hovered.
+            // Where chips stack into a deck, a repeat behind its twin or a chip with no free
+            // spot, the deck's front shows how many chips it holds. The deck spreads apart
+            // while tapped or hovered, mostly the way it already fans.
             val chipGroups = JournalChipLayout.piles(
                 chipPlacements,
                 minOverlapX = with(LocalDensity.current) { 12.dp.toPx() },

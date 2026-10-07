@@ -126,7 +126,7 @@ class JournalChipLayoutTests {
         foldInto: Int? = null
     ) = JournalChipRequest(anchorX, baseTop, width, previous, stackKey, foldInto)
 
-    private val stacking = spec.copy(peek = 8f, repeatReach = 100f)
+    private val stacking = spec.copy(peek = 5f, repeatReach = 100f)
 
     private fun assertNoOverlaps(placements: List<JournalChipPlacement>) {
         for (i in placements.indices) for (j in placements.indices) {
@@ -214,29 +214,32 @@ class JournalChipLayoutTests {
     // --- Piles ---
 
     @Test
-    fun repeatsTuckBehindTheirTwinInsteadOfClimbing() {
-        // A loop's 0,2 U doses five minutes apart, with every row above taken off the chart.
+    fun repeatsStackIntoADeckThatFansUpInsteadOfClimbing() {
+        // A loop's 0,2 U doses five minutes apart, with no room for a row above.
         val tight = stacking.copy(minTop = 190f, maxTop = 210f)
         val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 20f, stackKey = "0,2") }, tight)
 
         assertTrue(placements.none { it.crowded })
-        assertEquals(0, placements[0].depth)
         assertTrue(placements.all { it.front == 0 })
         assertEquals(listOf(0, 1, 2), placements.map { it.depth })
-        // Each one's edge still shows.
-        for (i in placements.indices) for (j in placements.indices) {
-            if (i < j) {
-                val a = placements[i].box
-                val b = placements[j].box
-                assertTrue(kotlin.math.abs(a.left - b.left) >= 8f || kotlin.math.abs(a.top - b.top) >= 8f)
-            }
-        }
+        // Each layer shows its top edge 5px above the one in front, straight up.
+        assertEquals(listOf(200f, 195f, 190f), placements.map { it.box.top })
+        assertTrue(placements.all { it.box.left == placements[0].box.left })
+        assertEquals(-1, placements[1].tuck!!.direction)
+    }
+
+    @Test
+    fun aDeckFansDownWhereUpHasNoRoom() {
+        val tight = stacking.copy(minTop = 200f, maxTop = 220f)
+        val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 20f, stackKey = "0,2") }, tight)
+
+        assertEquals(listOf(200f, 205f, 210f), placements.map { it.box.top })
     }
 
     @Test
     fun aUniqueValueGetsAFreeSpotBeforeRepeatsDo() {
         // The 3 U bolus comes last in time but claims its own spot first; the two 0,2 U
-        // doses either side of it make do by tucking.
+        // doses either side of it make do by stacking.
         val tight = stacking.copy(minTop = 190f, maxTop = 210f, maxNudge = 1)
         val placements = JournalChipLayout.place(
             listOf(
@@ -249,11 +252,11 @@ class JournalChipLayoutTests {
 
         assertTrue(!placements[2].crowded)
         assertEquals(0, placements[2].depth)
-        for (i in 0..1) assertTrue(!overlapping(placements[i].box, placements[2].box))
+        assertEquals(2, placements[2].front)
     }
 
     @Test
-    fun differentValuesNeverTuckBehindEachOther() {
+    fun differentValuesNeverStackWhileThereIsRoom() {
         val placements = JournalChipLayout.place(
             listOf(request(100f, stackKey = "0,2"), request(105f, stackKey = "0,3")),
             stacking
@@ -263,11 +266,46 @@ class JournalChipLayoutTests {
     }
 
     @Test
-    fun aPileHoldsOnlyAFew() {
-        val tight = stacking.copy(minTop = 190f, maxTop = 300f, maxStack = 2)
-        val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 10f, stackKey = "0,2") }, tight)
+    fun aDeckOfRepeatsHoldsOnlyAFew() {
+        val roomy = stacking.copy(maxStack = 2)
+        val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 10f, stackKey = "0,2") }, roomy)
 
         assertTrue(placements.groupBy { it.front }.values.all { it.size <= 2 })
+    }
+
+    @Test
+    fun aChipWithNoFreeSpotJoinsTheDeckInItsWay() {
+        val tight = stacking.copy(maxX = 120f, minTop = 190f, maxTop = 210f, maxNudge = 0)
+
+        val placements = JournalChipLayout.place(listOf(request(10f, stackKey = "a"), request(12f, stackKey = "b"), request(14f, stackKey = "c")), tight)
+
+        assertTrue(placements.drop(1).all { it.crowded && it.tuck != null && it.front == 0 })
+        assertTrue(placements.all { it.box.left == placements[0].box.left })
+        assertEquals(listOf(listOf(0, 1, 2)), JournalChipLayout.piles(placements, 12f, 8f).map { it.toList() })
+    }
+
+    @Test
+    fun decksHoldStillFromFrameToFrame() {
+        // Scrolling in from the right edge, 7px a frame, where a front has to give up its spot
+        // as its entry arrives: every chip still keeps its deck, front and layer.
+        val tight = stacking.copy(minTop = 190f, maxTop = 210f)
+        val anchors = listOf(370f, 385f, 400f, 378f)
+        val keys = listOf("0,2", "0,2", "0,2", "5 g")
+        var slots = arrayOfNulls<JournalChipSlot>(anchors.size)
+        var tucks = arrayOfNulls<JournalChipTuck>(anchors.size)
+        var first: List<Pair<Int, Int>>? = null
+        for (frame in 0 until 15) {
+            val placements = JournalChipLayout.place(
+                anchors.indices.map { i ->
+                    request(anchors[i] - frame * 7f, stackKey = keys[i], previous = slots[i]).copy(previousTuck = tucks[i])
+                },
+                tight
+            )
+            val roles = placements.map { it.front to it.depth }
+            if (first == null) first = roles else assertEquals("frame $frame", first, roles)
+            slots = Array(anchors.size) { placements[it].slot.takeIf { _ -> placements[it].tuck == null } }
+            tucks = Array(anchors.size) { placements[it].tuck }
+        }
     }
 
     @Test
@@ -278,16 +316,6 @@ class JournalChipLayoutTests {
         assertEquals(0, placements[1].front)
         assertEquals(placements[0].box, placements[1].box)
         assertEquals(listOf(listOf(0, 1)), JournalChipLayout.piles(placements, 12f, 8f).map { it.toList() })
-    }
-
-    @Test
-    fun anEdgePeekingOutIsNotCountedAsHidden() {
-        // The twin sits 75px across, tucked 5px under its front, so its label shows.
-        val tight = stacking.copy(minTop = 190f, maxTop = 210f)
-        val placements = JournalChipLayout.place(listOf(request(100f, stackKey = "0,2"), request(175f, stackKey = "0,2")), tight)
-
-        assertEquals(0, placements[1].front)
-        assertTrue(JournalChipLayout.piles(placements, 12f, 8f).isEmpty())
     }
 
     @Test
