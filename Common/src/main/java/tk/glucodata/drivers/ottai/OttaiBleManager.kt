@@ -31,8 +31,10 @@ import java.security.interfaces.ECPublicKey
 import java.util.UUID
 import kotlin.math.abs
 import tk.glucodata.Applic
+import tk.glucodata.CurrentDisplaySource
 import tk.glucodata.HistoryRepositoryAccess
 import tk.glucodata.HistorySyncAccess
+import tk.glucodata.LiveReadingLanes
 import tk.glucodata.Log
 import tk.glucodata.logd
 import tk.glucodata.logi
@@ -3604,9 +3606,22 @@ class OttaiBleManager(
     private fun publishCurrentReading(reading: EmittedReading) {
         val id = SerialNumber ?: return
         if (!reading.displayValue.isFinite() || reading.displayValue <= 0f) return
+        // Ottai's formula glucose is still stock data: adjustGlucose does not include
+        // this app's user calibration. The external float API expects a resolved value.
+        // Resolve before publishing, including when the asynchronous Room write is pending.
+        // rawCurrent is an electrode diagnostic, so there is no raw glucose lane here.
+        val display = CurrentDisplaySource.resolveIncomingReading(
+            reading = LiveReadingLanes.stock(reading.displayValue, Float.NaN),
+            rate = 0f,
+            targetTimeMillis = reading.sampleMs,
+            preferredSensorId = id,
+            sensorGen = SENSOR_GEN,
+            source = "ottai-live",
+            preferIncomingSample = true,
+        ) ?: return
         markLocalReadingAccepted(reading.sampleMs)
-        SuperGattCallback.processExternalCurrentReading(id, reading.displayValue, 0f, reading.sampleMs, SENSOR_GEN)
-        Log.i(TAG, "current publish sec=${reading.sampleMs / 1000L} display=%.2f mgdl=%.1f".format(reading.displayValue, reading.mgdl))
+        SuperGattCallback.processExternalCurrentReading(id, display.primaryValue, display.rate, display.timeMillis, SENSOR_GEN)
+        Log.i(TAG, "current publish sec=${display.timeMillis / 1000L} display=%.2f stockMgdl=%.1f".format(display.primaryValue, reading.mgdl))
     }
 
     private fun resolveSampleTimeMs(
