@@ -6,6 +6,11 @@
   },
   "files": [
     {
+      "path": "Common/src/main/jniLibs/arm64-v8a/libCALCULATION.so",
+      "size": 656872,
+      "sha256": "0bc4e28b98b8ba4e9ea47db0f4cf413febf596eb94bfe87162432031cd02d4cf"
+    },
+    {
       "path": "Common/src/main/jniLibs/arm64-v8a/libalgorithm-jni.so",
       "size": 1591056,
       "sha256": "1303a4488524d66e37c64d93c315d40de6c5695972b606252e220d664acd18ce"
@@ -79,6 +84,11 @@
       "path": "Common/src/main/jniLibs/arm64-v8a/libscannative.so",
       "size": 2603456,
       "sha256": "94a581aae902ab314e6b63fcd91cbe855befa5e9e7c2fe6ea3cf7737d356e1f0"
+    },
+    {
+      "path": "Common/src/main/jniLibs/armeabi-v7a/libCALCULATION.so",
+      "size": 460157,
+      "sha256": "d3d7f162b38e4d0bbe635abc25998ed92d2afc8b5cfae5f3b51df94ba2d613e9"
     },
     {
       "path": "Common/src/main/jniLibs/armeabi-v7a/libalgorithm-jni.so",
@@ -165,5 +175,6 @@
       "size": 1570684,
       "sha256": "19c1eb554c1bcfc9aad389d62b40f8f5d60d8e3457f0fb17100eb7c7c267a307"
     }
-  ]
+  ],
+  "bootstrapRequired": true
 }
