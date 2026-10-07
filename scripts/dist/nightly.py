@@ -14,7 +14,7 @@ import tempfile
 import dist
 
 REPO = 'ctqvva/JugglucoNG'
-KEEP = 7
+KEEP = 3
 TAG_PATTERN = r'nightly-(\d{4}-\d{2}-\d{2})-([0-9a-f]{12})'
 MARKER_PATTERN = r'<!-- juggluco-nightly:([0-9a-f]{40}) -->'
 
@@ -166,7 +166,7 @@ The internal app version remains **{version}** (phone versionCode **{code}**); s
 nightlies may show the same version. Android can reject installing over a higher versionCode.
 
 All four APKs and update-manifest.json are verified together. This prerelease never becomes
-GitHub's latest release and is excluded from the normal in-app updater. The seven most
+GitHub's latest release and is excluded from the normal in-app updater. The {KEEP} most
 recent published nightlies are retained; regular releases are retained unchanged.
 '''
 
