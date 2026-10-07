@@ -829,7 +829,8 @@ public:
                                                         uint32_t now) {
 
 #ifndef NOLOG
-    LOGGER("makeSIsensorindex(%s) len=%d\n", gegsSI.data(), gegsSI.size());
+    // Length only: a CareSens Air code carries the pairing PIN.
+    LOGGER("makeSIsensorindex() len=%zu\n", gegsSI.size());
 #endif
     bool hasnum = std::ranges::contains_subrange(gegsSI, sibionicsRecognition);
     const auto *endcode = gegsSI.end();

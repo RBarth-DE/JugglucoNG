@@ -80,7 +80,8 @@ class AirGattCallback extends SuperGattCallback {
 
     private final String csairKey = "tq1Tg265o4UFD8tfPvNqUCiYyCxkhdZV";
     private String swRevision = "";
-    private boolean receiveNotes = false;
+    // Also cleared by the delayed setup writes, off the GATT callback thread.
+    private volatile boolean receiveNotes = false;
     final private String AppID = "csair";
 
     // The GATT callbacks below check identity but must not hold this monitor:
@@ -91,6 +92,27 @@ class AirGattCallback extends SuperGattCallback {
     // the native calls, which never call back into Java, so it is a leaf lock:
     // free() takes it after this monitor, and nothing holding it waits for another.
     private final Object nativeLock = new Object();
+
+    // An address that turned out not to be a usable Air transmitter: the Air
+    // characteristics are missing or the firmware is unsupported. Scans skip it
+    // for a while instead of reconnecting at once. The wait is bounded because a
+    // stale GATT cache on the real transmitter can look the same.
+    private static final long REJECT_MILLIS = 15 * 60 * 1000L;
+    private volatile long rejectedUntil = 0L;
+    private volatile String rejectedAddress = null;
+    private boolean rejectedConnection = false;
+
+    private void rejectDevice(BluetoothGatt bluetoothGatt, String why) {
+        handshake = why;
+        wrotepass[1] = System.currentTimeMillis();
+        Log.e(LOG_ID, "rejectDevice: " + why);
+        rejectedUntil = System.currentTimeMillis() + REJECT_MILLIS;
+        rejectedAddress = bluetoothGatt.getDevice().getAddress();
+        rejectedConnection = true;
+        // The next connect scans for the transmitter instead of reusing the address.
+        searchforDeviceAddress();
+        disconnect();
+    }
 
     private boolean isCurrentGatt(BluetoothGatt gatt) {
         return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
@@ -122,56 +144,72 @@ class AirGattCallback extends SuperGattCallback {
             enableNotification(bluetoothGatt, charact21);
             return;
         }
+        // The transmitter wants a pause before each of these writes. Wait on the
+        // scheduler, not here: sleeping blocks every other GATT callback.
         if (uuidstr.equals(UUIDchar21)) {
-            sleep(500L);
-            charact21.setWriteType(WRITE_TYPE_NO_RESPONSE);
-            if (swRevision.compareTo("1.4") < 0) {
-                byte b2 = 0;
-                charact21.setValue(new byte[]{-64, 1, (byte) 16, (byte) 39, b2, b2, (byte) (b2 & 255), (byte) ((b2 >> 8) & 255), (byte) 1, b2, b2});
-            } else {
-                final String serial = sensorSerial;
-                if (serial == null || serial.length() < 6) {
-                    Log.e(LOG_ID, "onDescriptorWrite: no transmitter serial");
-                    disconnect();
-                    return;
-                }
-                final int seriallen = serial.length();
-                final var lastsix = serial.substring(seriallen - 6);
-                final String iv = lastsix + lastsix + serial.substring(seriallen - 4);
-                ByteBuffer auth = ByteBuffer.allocate(18);
-                auth.order(ByteOrder.LITTLE_ENDIAN);
-                try {
-                    Charset charset = StandardCharsets.UTF_8;
-                    SecretKeySpec secretKeySpec = new SecretKeySpec(csairKey.getBytes(charset), "AES");
-                    Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-                    cipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, new IvParameterSpec(iv.getBytes(charset)));
-                    byte[] encrypted = cipher.doFinal(serial.getBytes(charset));
-                    auth.put((byte) -64);
-                    auth.put((byte) 1);
-                    auth.put(encrypted, 0, Math.min(encrypted.length, auth.remaining()));
-                } catch (Throwable th) {
-                    Log.stack(LOG_ID, "onDescriptorWrite encrypt", th);
-                    disconnect();
-                    return;
-                }
-                charact21.setValue(auth.array());
-            }
             receiveNotes = false;
-            bluetoothGatt.writeCharacteristic(charact21);
+            Applic.scheduler.schedule(() -> writeAuthIfCurrent(bluetoothGatt), 500, TimeUnit.MILLISECONDS);
             return;
         }
         if (uuidstr.equals(UUIDchar22)) {
-            sleep(100L);
-            charact22.setWriteType(WRITE_TYPE_NO_RESPONSE);
-            byte[] buf = new byte[35];
-            final byte[] start = {-64, 3, (byte) 'c', (byte) 's', (byte) 'a', (byte) 'i', (byte) 'r'};
-            System.arraycopy(start, 0, buf, 0, start.length);
-            if (unusedSensor)
-                buf[34] = 1;
-            charact22.setValue(buf);
-            bluetoothGatt.writeCharacteristic(charact22);
             receiveNotes = false;
+            Applic.scheduler.schedule(() -> writeAppIdIfCurrent(bluetoothGatt), 100, TimeUnit.MILLISECONDS);
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private synchronized void writeAuthIfCurrent(BluetoothGatt bluetoothGatt) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
+        charact21.setWriteType(WRITE_TYPE_NO_RESPONSE);
+        if (swRevision.compareTo("1.4") < 0) {
+            byte b2 = 0;
+            charact21.setValue(new byte[]{-64, 1, (byte) 16, (byte) 39, b2, b2, (byte) (b2 & 255), (byte) ((b2 >> 8) & 255), (byte) 1, b2, b2});
+        } else {
+            final String serial = sensorSerial;
+            if (serial == null || serial.length() < 6) {
+                Log.e(LOG_ID, "writeAuth: no transmitter serial");
+                disconnect();
+                return;
+            }
+            final int seriallen = serial.length();
+            final var lastsix = serial.substring(seriallen - 6);
+            final String iv = lastsix + lastsix + serial.substring(seriallen - 4);
+            ByteBuffer auth = ByteBuffer.allocate(18);
+            auth.order(ByteOrder.LITTLE_ENDIAN);
+            try {
+                Charset charset = StandardCharsets.UTF_8;
+                SecretKeySpec secretKeySpec = new SecretKeySpec(csairKey.getBytes(charset), "AES");
+                Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+                cipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, new IvParameterSpec(iv.getBytes(charset)));
+                byte[] encrypted = cipher.doFinal(serial.getBytes(charset));
+                auth.put((byte) -64);
+                auth.put((byte) 1);
+                auth.put(encrypted, 0, Math.min(encrypted.length, auth.remaining()));
+            } catch (Throwable th) {
+                Log.stack(LOG_ID, "writeAuth encrypt", th);
+                disconnect();
+                return;
+            }
+            charact21.setValue(auth.array());
+        }
+        receiveNotes = false;
+        bluetoothGatt.writeCharacteristic(charact21);
+    }
+
+    @SuppressLint("MissingPermission")
+    private synchronized void writeAppIdIfCurrent(BluetoothGatt bluetoothGatt) {
+        if (!isCurrentGatt(bluetoothGatt))
+            return;
+        charact22.setWriteType(WRITE_TYPE_NO_RESPONSE);
+        byte[] buf = new byte[35];
+        final byte[] start = {-64, 3, (byte) 'c', (byte) 's', (byte) 'a', (byte) 'i', (byte) 'r'};
+        System.arraycopy(start, 0, buf, 0, start.length);
+        if (unusedSensor)
+            buf[34] = 1;
+        charact22.setValue(buf);
+        bluetoothGatt.writeCharacteristic(charact22);
+        receiveNotes = false;
     }
 
     private PendingIntent onalarm = null;
@@ -199,6 +237,7 @@ class AirGattCallback extends SuperGattCallback {
             Log.i(LOG_ID, SerialNumber + " onConnectionStateChange, status:" + status + ", state: " + (newState < state.length ? state[newState] : newState) + " bondstate=" + bondstate);
         }
         if (newState == BluetoothProfile.STATE_CONNECTED) {
+            rejectedConnection = false;
             bluetoothGatt.requestMtu(512);
             constatchange[0] = tim;
         } else {
@@ -206,7 +245,10 @@ class AirGattCallback extends SuperGattCallback {
             setConStatus(status);
             constatchange[1] = tim;
             if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                if (!autoconnect) {
+                // Auto-connect would only reconnect to a rejected device.
+                final boolean rejected = rejectedConnection;
+                rejectedConnection = false;
+                if (!autoconnect || rejected) {
                     bluetoothGatt.close();
                     mBluetoothGatt = null;
                     if (!stop) {
@@ -263,7 +305,10 @@ class AirGattCallback extends SuperGattCallback {
     private BluetoothGattCharacteristic charact22;
 
     @SuppressLint("MissingPermission")
-    private boolean discover(BluetoothGatt bluetoothGatt) {
+    private void discover(BluetoothGatt bluetoothGatt) {
+        // Handles from an earlier connection must not make this device look complete.
+        charact1 = charact2 = charact3 = charact4 = charact5 = charact6 = charact7 = null;
+        charact11 = charact21 = charact22 = null;
         for (BluetoothGattService bluetoothGattService : bluetoothGatt.getServices()) {
             if (doLog)
                 Log.i(LOG_ID, "Service: " + bluetoothGattService.getUuid().toString());
@@ -286,20 +331,19 @@ class AirGattCallback extends SuperGattCallback {
             }
         }
         if (charact11 == null || charact21 == null || charact22 == null) {
-            Log.e(LOG_ID, "discover: ERROR: data characteristics missing");
-            return false;
+            rejectDevice(bluetoothGatt, "Air data characteristics missing");
+            return;
         }
         if (didRun) {
             afterReads(bluetoothGatt);
         } else {
             final var first = askExtraInfo ? charact1 : charact3;
             if (first == null) {
-                Log.e(LOG_ID, "discover: ERROR: " + (askExtraInfo ? UUIDchar1 : UUIDchar3) + " missing");
-                return false;
+                rejectDevice(bluetoothGatt, (askExtraInfo ? UUIDchar1 : UUIDchar3) + " missing");
+                return;
             }
             bluetoothGatt.readCharacteristic(first);
         }
-        return true;
     }
 
     @Override
@@ -308,8 +352,8 @@ class AirGattCallback extends SuperGattCallback {
             return;
         if (doLog) {Log.i(LOG_ID, "BLE onServicesDiscovered, status: " + status);}
         if (status == GATT_SUCCESS) {
-            if (!discover(bluetoothGatt))
-                disconnect();
+            // Disconnects a device it rejects.
+            discover(bluetoothGatt);
             return;
         }
         disconnect();
@@ -406,10 +450,7 @@ class AirGattCallback extends SuperGattCallback {
                     readNext(bluetoothGatt, charact5);
                     return;
                 }
-                handshake = "Unsupported firmware " + fwRevision;
-                wrotepass[1] = System.currentTimeMillis();
-                Log.e(LOG_ID, "WRONG fwRevision: " + fwRevision);
-                bluetoothGatt.disconnect();
+                rejectDevice(bluetoothGatt, "Unsupported firmware " + fwRevision);
                 return;
             }
             case UUIDchar5: {
@@ -821,6 +862,8 @@ class AirGattCallback extends SuperGattCallback {
     /** Advertised as "CSAir " followed by the last four characters of the serial. */
     @Override
     public boolean matchDeviceName(String nameDevice, String address) {
+        if (address != null && address.equals(rejectedAddress) && System.currentTimeMillis() < rejectedUntil)
+            return false;
         final String start = "CSAir ";
         return nameDevice != null && SerialNumber.length() >= 4 && nameDevice.startsWith(start)
                 && nameDevice.regionMatches(start.length(), SerialNumber, SerialNumber.length() - 4, 4);
