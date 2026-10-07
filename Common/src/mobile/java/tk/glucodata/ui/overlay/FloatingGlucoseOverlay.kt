@@ -108,13 +108,8 @@ fun FloatingGlucoseOverlay(
             delay(wait)
         }
     }
-    val isFresh = DisplayDataState.resolve(
-        sensorPresent = true,
-        currentTimestampMillis = currentSnapshot?.timeMillis ?: 0L,
-        latestHistoryTimestampMillis = glucosePoint?.timestamp ?: 0L,
-        nowMillis = freshnessNow
-    ).isFresh
-    val displayPoint = glucosePoint?.takeIf { isFresh }
+    // Every layout (pill, side and top island) reads value and arrow from this.
+    val displayPoint = overlayDisplayPoint(glucosePoint, currentSnapshot?.timeMillis ?: 0L, freshnessNow)
     
     // View Mode & Calibration
     val viewData = remember(currentSnapshot, glucosePoint, currentSensorId) {
@@ -722,4 +717,24 @@ internal fun nextOverlayFreshnessCheckDelay(
     val untilStale = latestReadingMillis + freshnessWindowMillis - nowMillis
     if (untilStale < 0L) return null
     return (untilStale + 1L).coerceAtMost(OVERLAY_FRESHNESS_POLL_MS)
+}
+
+/**
+ * The point the overlay may show at [nowMillis]: the latest one while it is within
+ * the widget/dashboard freshness window, null (the no-data state) once it is not.
+ */
+internal fun overlayDisplayPoint(
+    latestPoint: GlucosePoint?,
+    snapshotMillis: Long,
+    nowMillis: Long,
+    freshnessWindowMillis: Long = Notify.glucosetimeout
+): GlucosePoint? {
+    val isFresh = DisplayDataState.resolve(
+        sensorPresent = true,
+        currentTimestampMillis = snapshotMillis,
+        latestHistoryTimestampMillis = latestPoint?.timestamp ?: 0L,
+        freshnessWindowMillis = freshnessWindowMillis,
+        nowMillis = nowMillis
+    ).isFresh
+    return latestPoint?.takeIf { isFresh }
 }
