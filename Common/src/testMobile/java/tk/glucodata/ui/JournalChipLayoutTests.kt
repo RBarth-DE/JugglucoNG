@@ -214,7 +214,7 @@ class JournalChipLayoutTests {
     // --- Piles ---
 
     @Test
-    fun repeatsStackIntoADeckThatFansUpInsteadOfClimbing() {
+    fun repeatsTuckBehindTheirTwinInsteadOfClimbing() {
         // A loop's 0,2 U doses five minutes apart, with no room for a row above.
         val tight = stacking.copy(minTop = 190f, maxTop = 210f)
         val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 20f, stackKey = "0,2") }, tight)
@@ -222,18 +222,55 @@ class JournalChipLayoutTests {
         assertTrue(placements.none { it.crowded })
         assertTrue(placements.all { it.front == 0 })
         assertEquals(listOf(0, 1, 2), placements.map { it.depth })
-        // Each layer shows its top edge 5px above the one in front, straight up.
-        assertEquals(listOf(200f, 195f, 190f), placements.map { it.box.top })
-        assertTrue(placements.all { it.box.left == placements[0].box.left })
-        assertEquals(-1, placements[1].tuck!!.direction)
+        assertTrue(placements.all { it.box == placements[0].box })
     }
 
     @Test
-    fun aDeckFansDownWhereUpHasNoRoom() {
-        val tight = stacking.copy(minTop = 200f, maxTop = 220f)
-        val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 20f, stackKey = "0,2") }, tight)
+    fun chipsBehindAFrontPeekPartWayTowardWhereTheySpread() {
+        // A front with three chips behind it and room all round: the first two peek out part of
+        // the way to where the pile spreads them, and the third stays wholly behind.
+        val boxes = List(4) { box(100f, 200f) }
+        val pile = intArrayOf(0, 1, 2, 3)
+        fun spreadOf(members: IntArray) = JournalChipLayout.spread(boxes, members, 0f, 1000f, 8f, 400f, 4f, 4f, 200f)
+        val shifts = spreadOf(pile).shifts
 
-        assertEquals(listOf(200f, 205f, 210f), placements.map { it.box.top })
+        val peeks = JournalChipLayout.peeks(4, listOf(pile), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
+
+        assertEquals(null, peeks[0])
+        assertEquals(null, peeks[3])
+        for (layer in 1..2) {
+            val (dx, dy) = shifts[layer].let { it[0] to it[1] }
+            val length = kotlin.math.hypot(dx, dy)
+            val part = minOf(0.4f, layer * 12f / length)
+            assertEquals(dx * part, peeks[layer]!![0], 0.01f)
+            assertEquals(dy * part, peeks[layer]!![1], 0.01f)
+        }
+        // The first straight up; the second straight down, the nearest room left.
+        assertTrue(peeks[1]!![0] == 0f && peeks[1]!![1] < 0f)
+        assertTrue(peeks[2]!![0] == 0f && peeks[2]!![1] > 0f)
+    }
+
+    @Test
+    fun aSpreadKeepsLastTimesSpotWhileItIsClear() {
+        // Straight up is nearest, but last time the chip went down, and down is still clear.
+        val boxes = listOf(box(100f, 200f), box(100f, 200f))
+
+        val kept = JournalChipLayout.spread(boxes, intArrayOf(0, 1), 0f, 1000f, 8f, 400f, 4f, 4f, 200f, preferred = arrayOf(null, floatArrayOf(0f, 40f)))
+        assertArrayEquals(floatArrayOf(0f, 40f), kept.shifts[1], 0.001f)
+
+        // Once a chip sits there, it looks again.
+        val blocked = JournalChipLayout.spread(boxes + box(100f, 240f), intArrayOf(0, 1), 0f, 1000f, 8f, 400f, 4f, 4f, 200f, preferred = arrayOf(null, floatArrayOf(0f, 40f)))
+        assertTrue(blocked.shifts[1][1] < 0f)
+    }
+
+    @Test
+    fun aChipWithNowhereToSpreadDoesNotPeek() {
+        val boxes = listOf(box(0f, 8f), box(2f, 8f))
+        fun spreadOf(members: IntArray) = JournalChipLayout.spread(boxes, members, 0f, 102f, 8f, 8f, 4f, 4f, 200f)
+
+        val peeks = JournalChipLayout.peeks(2, listOf(intArrayOf(0, 1)), visibleLayers = 2, peek = 12f, spreadOf = ::spreadOf)
+
+        assertEquals(null, peeks[1])
     }
 
     @Test
@@ -266,7 +303,7 @@ class JournalChipLayoutTests {
     }
 
     @Test
-    fun aDeckOfRepeatsHoldsOnlyAFew() {
+    fun aPileOfRepeatsHoldsOnlyAFew() {
         val roomy = stacking.copy(maxStack = 2)
         val placements = JournalChipLayout.place((0 until 3).map { request(100f + it * 10f, stackKey = "0,2") }, roomy)
 
@@ -274,7 +311,7 @@ class JournalChipLayoutTests {
     }
 
     @Test
-    fun aChipWithNoFreeSpotJoinsTheDeckInItsWay() {
+    fun aChipWithNoFreeSpotJoinsThePileInItsWay() {
         val tight = stacking.copy(maxX = 120f, minTop = 190f, maxTop = 210f, maxNudge = 0)
 
         val placements = JournalChipLayout.place(listOf(request(10f, stackKey = "a"), request(12f, stackKey = "b"), request(14f, stackKey = "c")), tight)
@@ -285,9 +322,9 @@ class JournalChipLayoutTests {
     }
 
     @Test
-    fun decksHoldStillFromFrameToFrame() {
+    fun pilesHoldStillFromFrameToFrame() {
         // Scrolling in from the right edge, 7px a frame, where a front has to give up its spot
-        // as its entry arrives: every chip still keeps its deck, front and layer.
+        // as its entry arrives: every chip still keeps its pile, front and layer.
         val tight = stacking.copy(minTop = 190f, maxTop = 210f)
         val anchors = listOf(370f, 385f, 400f, 378f)
         val keys = listOf("0,2", "0,2", "0,2", "5 g")
@@ -363,7 +400,7 @@ class JournalChipLayoutTests {
     }
 
     @Test
-    fun aChipPastAFullDeckWithNoFreeSpotStillJoinsIt() {
+    fun aChipPastAFullPileWithNoFreeSpotStillJoinsIt() {
         val tight = stacking.copy(maxX = 200f, minTop = 190f, maxTop = 210f, maxNudge = 0, maxStack = 4)
 
         val placements = JournalChipLayout.place((0 until 5).map { request(10f + it, stackKey = "0,2") }, tight)
