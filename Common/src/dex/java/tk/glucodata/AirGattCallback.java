@@ -93,6 +93,10 @@ class AirGattCallback extends SuperGattCallback {
     // free() takes it after this monitor, and nothing holding it waits for another.
     private final Object nativeLock = new Object();
 
+    // Changes on every connection state change. With auto-connect the same GATT
+    // object reconnects, so the delayed setup writes check this as well.
+    private volatile int connectionEpoch = 0;
+
     private boolean isCurrentGatt(BluetoothGatt gatt) {
         return !stop && dataptr != 0L && gatt != null && gatt == mBluetoothGatt;
     }
@@ -127,18 +131,20 @@ class AirGattCallback extends SuperGattCallback {
         // scheduler, not here: sleeping blocks every other GATT callback.
         if (uuidstr.equals(UUIDchar21)) {
             receiveNotes = false;
-            Applic.scheduler.schedule(() -> writeAuthIfCurrent(bluetoothGatt), 500, TimeUnit.MILLISECONDS);
+            final int epoch = connectionEpoch;
+            Applic.scheduler.schedule(() -> writeAuthIfCurrent(bluetoothGatt, epoch), 500, TimeUnit.MILLISECONDS);
             return;
         }
         if (uuidstr.equals(UUIDchar22)) {
             receiveNotes = false;
-            Applic.scheduler.schedule(() -> writeAppIdIfCurrent(bluetoothGatt), 100, TimeUnit.MILLISECONDS);
+            final int epoch = connectionEpoch;
+            Applic.scheduler.schedule(() -> writeAppIdIfCurrent(bluetoothGatt, epoch), 100, TimeUnit.MILLISECONDS);
         }
     }
 
     @SuppressLint("MissingPermission")
-    private synchronized void writeAuthIfCurrent(BluetoothGatt bluetoothGatt) {
-        if (!isCurrentGatt(bluetoothGatt))
+    private synchronized void writeAuthIfCurrent(BluetoothGatt bluetoothGatt, int epoch) {
+        if (!isCurrentGatt(bluetoothGatt) || epoch != connectionEpoch)
             return;
         charact21.setWriteType(WRITE_TYPE_NO_RESPONSE);
         if (swRevision.compareTo("1.4") < 0) {
@@ -177,8 +183,8 @@ class AirGattCallback extends SuperGattCallback {
     }
 
     @SuppressLint("MissingPermission")
-    private synchronized void writeAppIdIfCurrent(BluetoothGatt bluetoothGatt) {
-        if (!isCurrentGatt(bluetoothGatt))
+    private synchronized void writeAppIdIfCurrent(BluetoothGatt bluetoothGatt, int epoch) {
+        if (!isCurrentGatt(bluetoothGatt) || epoch != connectionEpoch)
             return;
         charact22.setWriteType(WRITE_TYPE_NO_RESPONSE);
         byte[] buf = new byte[35];
@@ -209,6 +215,7 @@ class AirGattCallback extends SuperGattCallback {
         if (!acceptConnectionAttemptCallback(bluetoothGatt, newState) || dataptr == 0L)
             return;
         super.onConnectionStateChange(bluetoothGatt, status, newState);
+        ++connectionEpoch;
         long tim = System.currentTimeMillis();
         if (doLog) {
             final var bondstate = bluetoothGatt.getDevice().getBondState();
@@ -281,6 +288,9 @@ class AirGattCallback extends SuperGattCallback {
 
     @SuppressLint("MissingPermission")
     private boolean discover(BluetoothGatt bluetoothGatt) {
+        // Handles from an earlier connection must not make this one look complete.
+        charact1 = charact2 = charact3 = charact4 = charact5 = charact6 = charact7 = null;
+        charact11 = charact21 = charact22 = null;
         for (BluetoothGattService bluetoothGattService : bluetoothGatt.getServices()) {
             if (doLog)
                 Log.i(LOG_ID, "Service: " + bluetoothGattService.getUuid().toString());

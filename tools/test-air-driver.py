@@ -223,6 +223,7 @@ class AirGattCallback extends SuperGattCallback {
   static final boolean doLog = false;
   static final int GATT_SUCCESS = 0, BOND_BONDED = 12, GATT_INSUFFICIENT_AUTHENTICATION = 5, WRITE_TYPE_NO_RESPONSE = 1;
   boolean unusedSensor;
+  volatile int connectionEpoch;
   static final String LOG_ID = "test", UUIDchar11 = "00000000-0000-0000-0000-000000000001",
       UUIDchar21 = "00000000-0000-0000-0000-000000000002", UUIDchar22 = "00000000-0000-0000-0000-000000000003";
   long datatime;
@@ -234,7 +235,7 @@ class AirGattCallback extends SuperGattCallback {
   int resets, frames, discoveries;
   void resetValues() { ++resets; }
   boolean discover(BluetoothGatt g) { ++discoveries; return true; }
-  void writeAuthIfCurrent(BluetoothGatt g) {}
+  void writeAuthIfCurrent(BluetoothGatt g, int epoch) {}
   void onChar11Changed(BluetoothGatt g, byte[] bytes) { ++frames; }
   void onChar21Changed(BluetoothGattCharacteristic c, BluetoothGatt g, byte[] bytes) { ++frames; }
   void onChar22Changed(BluetoothGatt g, byte[] bytes) { ++frames; }
@@ -296,6 +297,13 @@ class AirGattCallback extends SuperGattCallback {
     cb.onDescriptorWrite(next, new BluetoothGattDescriptor(cb.charact22), 0);
     Applic.scheduler.drain();
     check(next.writes == 1, "current delayed app-ID write still runs");
+    cb.onDescriptorWrite(next, new BluetoothGattDescriptor(cb.charact22), 0);
+    cb.autoconnect = true;
+    cb.onConnectionStateChange(next, 0, BluetoothProfile.STATE_DISCONNECTED);
+    cb.onConnectionStateChange(next, 0, BluetoothProfile.STATE_CONNECTED);
+    Applic.scheduler.drain();
+    check(next.reconnects == 1 && next.writes == 1,
+          "a write scheduled before an auto-connect reconnect on the same GATT is dropped");
     System.out.println("Air GATT: retired callbacks, local ownership, delayed work and freed pointer passed");
   }
 }
