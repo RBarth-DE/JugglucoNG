@@ -667,6 +667,8 @@
     <string name="dexcom_setup_title">Konfiguracja Dexcom</string>
     <string name="scan_dexcom">Skanuj Dexcom</string>
     <string name="dexcom_scan_instruction">Zeskanuj kod datamatrix na sensorze Dexcom</string>
+    <string name="dexcom_pairing_code_label">4-cyfrowy kod parowania</string>
+    <string name="dexcom_pairing_code_instruction">Wpisz 4-cyfrowy kod parowania wydrukowany na aplikatorze sensora.</string>
     <string name="libre_setup_title">Konfiguracja Libre</string>
     <string name="scan_libre_sensor">Skanuj Sensor Libre</string>
     <string name="libre_nfc_instruction">Przytrzymaj telefon przy sensorze, aby zeskanować</string>

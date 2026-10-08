@@ -539,6 +539,8 @@
     <string name="dexcom_setup_title">Configuration Dexcom</string>
     <string name="scan_dexcom">Scanner Dexcom</string>
     <string name="dexcom_scan_instruction">Scannez le code datamatrix sur votre capteur Dexcom</string>
+    <string name="dexcom_pairing_code_label">Code d’association à 4 chiffres</string>
+    <string name="dexcom_pairing_code_instruction">Saisissez le code d’association à 4 chiffres imprimé sur l’applicateur du capteur.</string>
     <string name="libre_setup_title">Configuration Libre</string>
     <string name="scan_libre_sensor">Scanner Capteur Libre</string>
     <string name="libre_nfc_instruction">Tenez votre téléphone contre le capteur pour scanner</string>

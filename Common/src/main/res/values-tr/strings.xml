@@ -644,6 +644,8 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="dexcom_setup_title">Dexcom Kurulumu</string>
     <string name="scan_dexcom">Dexcom Tara</string>
     <string name="dexcom_scan_instruction">Dexcom sensöründeki datamatrix kodunu tarayın</string>
+    <string name="dexcom_pairing_code_label">4 haneli eşleştirme kodu</string>
+    <string name="dexcom_pairing_code_instruction">Sensör aplikatöründe yazan 4 haneli eşleştirme kodunu girin.</string>
     <string name="libre_setup_title">Libre Kurulumu</string>
     <string name="scan_libre_sensor">Libre Sensörü Tara</string>
     <string name="libre_nfc_instruction">Taramak için telefonu sensöre tutun</string>
