@@ -429,7 +429,10 @@ internal object JournalChipLayout {
             val box = boxFor(request, slot, spec) ?: continue
             if (leavesChart(request, box, spec)) continue
             var covered = 0f
+            // A wide chip spans several columns of the grid; count each one once.
+            val counted = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<JournalChipBox, Boolean>())
             layout.grid.forEachNear(box, 0f) { _, other ->
+                if (!counted.add(other)) return@forEachNear
                 val across = minOf(box.right, other.right) - maxOf(box.left, other.left)
                 val down = minOf(box.bottom, other.bottom) - maxOf(box.top, other.top)
                 if (across > 0f && down > 0f) covered += across * down
