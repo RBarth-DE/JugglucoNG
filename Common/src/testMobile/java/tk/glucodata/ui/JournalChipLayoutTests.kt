@@ -368,6 +368,27 @@ class JournalChipLayoutTests {
     }
 
     @Test
+    fun aCrowdedChipOfAnotherKindCoversAsLittleAsItCan() {
+        // Two rows of room, one insulin chip already in each; the carbs chip can't pile with
+        // them, so it takes the spot where it covers least of them.
+        val tight = stacking.copy(maxX = 200f, minTop = 170f, maxTop = 200f, maxNudge = 0)
+        val insulin = listOf(request(10f, baseTop = 200f).copy(kind = "insulin"), request(10f, baseTop = 170f).copy(kind = "insulin"))
+        val carbs = request(60f, baseTop = 200f, width = 60f).copy(kind = "carbs")
+
+        val placements = JournalChipLayout.place(insulin + carbs, tight)
+
+        val placed = placements[2]
+        assertTrue(placed.crowded && placed.tuck == null)
+        val covered = placements.take(2).sumOf { other ->
+            val across = minOf(placed.box.right, other.box.right) - maxOf(placed.box.left, other.box.left)
+            val down = minOf(placed.box.bottom, other.box.bottom) - maxOf(placed.box.top, other.box.top)
+            if (across > 0f && down > 0f) (across * down).toDouble() else 0.0
+        }
+        // Hanging right of its entry at 70..130 it covers only 20px of the 20..100 chips.
+        assertTrue("covered $covered", covered <= 30.0 * 26.0)
+    }
+
+    @Test
     fun pilesHoldStillFromFrameToFrame() {
         // Scrolling in from the right edge, 7px a frame, where a front has to give up its spot
         // as its entry arrives: every chip still keeps its pile, front and layer.

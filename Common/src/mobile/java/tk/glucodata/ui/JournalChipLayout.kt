@@ -400,13 +400,14 @@ internal object JournalChipLayout {
         }
         if (bestPile == null) {
             val ownX = request.anchorX + spec.sideOffset
-            val near = JournalChipBox(ownX - spec.repeatReach, 0f, ownX + spec.repeatReach, 0f)
+            val reach = spec.repeatReach / 2f + spec.sideOffset * 2f
+            val near = JournalChipBox(ownX - reach - request.width, 0f, ownX + reach, 0f)
             var bestDistance = Float.POSITIVE_INFINITY
             layout.grid.forEachNear(near, 0f) { owner, _ ->
                 if (owner == OBSTACLE) return@forEachNear
                 val front = layout.placements[owner]!!.front
                 val distance = kotlin.math.abs(layout.placements[front]!!.box.left - ownX)
-                if (distance > spec.repeatReach || distance >= bestDistance || !layout.mayJoin(index, front, crowded = true)) return@forEachNear
+                if (distance >= bestDistance || !layout.mayJoin(index, front, crowded = true) || !layout.withinTuckReach(index, front)) return@forEachNear
                 val pile = layout.pileBoxFor(index, front) ?: return@forEachNear
                 bestDistance = distance
                 bestFront = front
@@ -418,11 +419,31 @@ internal object JournalChipLayout {
             layout.commitTuck(index, bestFront, pile, crowded = true)
             return
         }
-        // With no pile in reach, the chip hangs on whichever side of its entry leaves the chart
-        // least.
-        val slot = listOf(JournalChipSlot.Preferred, JournalChipSlot(side = -1, lift = 0, nudge = 0))
+        // With no pile of its kind in reach, the chip takes the spot near its entry that covers
+        // the least of other chips, so both labels stay as readable as the room allows; failing
+        // any spot on the chart, it hangs on whichever side of its entry leaves the chart least.
+        var bestSlot: JournalChipSlot? = null
+        var bestBox: JournalChipBox? = null
+        var leastCovered = Float.POSITIVE_INFINITY
+        for ((slot, _) in slots) {
+            val box = boxFor(request, slot, spec) ?: continue
+            if (leavesChart(request, box, spec)) continue
+            var covered = 0f
+            layout.grid.forEachNear(box, 0f) { _, other ->
+                val across = minOf(box.right, other.right) - maxOf(box.left, other.left)
+                val down = minOf(box.bottom, other.bottom) - maxOf(box.top, other.top)
+                if (across > 0f && down > 0f) covered += across * down
+            }
+            // Ties go to the nearer, cheaper spot, as slots come cheapest first.
+            if (covered < leastCovered) {
+                leastCovered = covered
+                bestSlot = slot
+                bestBox = box
+            }
+        }
+        val slot = bestSlot ?: listOf(JournalChipSlot.Preferred, JournalChipSlot(side = -1, lift = 0, nudge = 0))
             .minBy { offScreenOf(request, boxFor(request, it, spec, clamp = true)!!, spec) }
-        layout.commit(index, slot, boxFor(request, slot, spec, clamp = true)!!, crowded = true)
+        layout.commit(index, slot, bestBox ?: boxFor(request, slot, spec, clamp = true)!!, crowded = true)
     }
 
     private const val CROWDED_CANDIDATES = 24
