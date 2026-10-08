@@ -221,6 +221,8 @@
     <string name="broadcast_computed_trend_desc">Use the app’s trend instead of the sensor’s</string>
     <string name="xdrip_compatible_title">xDrip broadcast</string>
     <string name="xdrip_compatible_desc">AAPS compatible</string>
+    <string name="xdrip_report_as_libre2_title">Identify as Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Lets AAPS allow SMB always with this sensor. Turn on only if you trust its readings</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Send glucose readings to Health Connect for compatible health apps</string>
     <string name="sensorpermission">Sensors permission</string>

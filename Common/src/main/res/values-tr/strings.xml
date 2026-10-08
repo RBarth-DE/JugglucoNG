@@ -1007,6 +1007,8 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="wipe_data">Wipe sensor data</string>
     <string name="writedown">Write down!</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Libre 2 olarak tanıt</string>
+    <string name="xdrip_report_as_libre2_desc">AAPS\'in bu sensörle SMB her zaman özelliğine izin vermesini sağlar. Yalnızca ölçümlerine güveniyorsanız açın</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Uyumlu sağlık uygulamaları için glikoz ölçümlerini Health Connect\'e gönder</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>

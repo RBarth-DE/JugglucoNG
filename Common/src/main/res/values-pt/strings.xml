@@ -979,6 +979,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="writedown">Write down!</string>
     <string name="wrongformat">"Wrong format "</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identificar como Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Permite que o AAPS ative SMB sempre com este sensor. Ative apenas se confiar nas suas leituras</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Enviar leituras de glicose para o Health Connect para apps de saúde compatíveis</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>

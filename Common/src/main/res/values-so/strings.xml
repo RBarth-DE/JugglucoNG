@@ -219,6 +219,8 @@
     <string name="glucodata_subtitle">GlucoDataHandler (GDH)</string>
     <string name="xdrip_compatible_title">xDrip baahinta</string>
     <string name="xdrip_compatible_desc">AAPS waafaqsan</string>
+    <string name="xdrip_report_as_libre2_title">U aqoonsii sida Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Waxay AAPS u oggolaanaysaa SMB always dareemahan. Shid kaliya haddii aad ku kalsoon tahay akhrintiisa</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">U dir akhrinta gulukooska Health Connect si ay u isticmaalaan abka caafimaadka ee la jaanqaadi kara</string>
     <string name="sensorpermission">Oggolaanshaha dareemayaasha</string>
