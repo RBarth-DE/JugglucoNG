@@ -24,14 +24,18 @@ def method(text, signature):
 
 methods = [method(source, x) for x in [
     'private void connectionAttemptExpired(', 'protected final void watchConnectionAttempt(', 'private Runnable getConnectDevice(',
-    'public synchronized boolean connectDevice(' if ng else 'public boolean connectDevice(',
+    'private synchronized boolean resolveActiveDevice(',
+    'public synchronized boolean connectDevice(long delayMillis, boolean force)' if ng else 'public boolean connectDevice(',
     'public final synchronized void closeGattTransport(' if ng else 'public void close()',
     'protected final synchronized boolean acceptConnectionAttemptCallback(' if ng else 'protected final boolean acceptConnectionStateChange(',
 ]]
 methods.append(method(libre, 'protected long connectionAttemptTimeoutMillis('))
 if ng:
     methods += [method(source,x) for x in ['private synchronized void markConnectRunnableStarted(', 'private synchronized void clearPendingConnect(', 'public synchronized void setPause(']]
-    methods += ['public void close() { closeGattTransport(); }']
+    methods += [
+        'public synchronized boolean connectDevice(long delayMillis) { return connectDevice(delayMillis, false); }',
+        'public void close() { closeGattTransport(); }',
+    ]
 
 preamble = r'''
 package tk.glucodata;
@@ -43,13 +47,17 @@ class SuperGattCallback {
     static final Object app=new Object();
     boolean stop=false, connectPending=false, ownership=false;
     long dataptr=1L, foundtime=0L, connectTime=0L, reconnectGeneration=0L;
+    long connectPendingAtElapsed=0L;
     String SerialNumber="synthetic", mActiveDeviceAddress="synthetic", mDeviceName;
     final Object gattLock=new Object();
     BluetoothDevice mActiveBluetoothDevice=new BluetoothDevice();
     BluetoothGatt mBluetoothGatt, locallyConnectedGatt, reconnectWaitingGatt;
     ScheduledFuture<?> pendingConnectFuture;
+    static class SystemClock { static long now=0L; static long elapsedRealtime(){return now;} }
     static SensorBluetooth blueone=new SensorBluetooth();
-    static class SensorBluetooth { boolean enabled=true; boolean bluetoothIsEnabled(){return enabled;} void scanStarter(int n){} }
+    static class SensorBluetooth { boolean enabled=true; boolean bluetoothIsEnabled(){return enabled;} void scanStarter(int n){} static BluetoothAdapter adapterOrNull(){return new BluetoothAdapter();} }
+    static class BluetoothAdapter { BluetoothDevice getRemoteDevice(String a){return new BluetoothDevice();} }
+    static class Natives { static String getDeviceAddress(long p,boolean n){return null;} }
     static class CloneSensorRegistry { static boolean clone; static boolean isCloneSensor(String s){return clone;} }
     static class SensorOwnershipRuntime { static boolean blocked; static boolean blocksLocalConnection(String s){return blocked;} }
     static class WearSensorClaim { static void onLocalGattDisconnected(String s){} }
@@ -70,7 +78,7 @@ class SuperGattCallback {
         long now; List<Job> jobs=new ArrayList<>();
         Scheduler(){super(1);}
         public ScheduledFuture<?> schedule(Runnable r,long delay,TimeUnit unit){Job j=new Job(r,now+unit.toMillis(delay));jobs.add(j);return j;}
-        void advance(long delta){long target=now+delta; while(true){Job j=jobs.stream().filter(x->!x.done&&x.at<=target).min(Comparator.comparingLong(x->x.at)).orElse(null);if(j==null)break;now=j.at;j.fire();}now=target;}
+        void advance(long delta){long target=now+delta; while(true){Job j=jobs.stream().filter(x->!x.done&&x.at<=target).min(Comparator.comparingLong(x->x.at)).orElse(null);if(j==null)break;now=j.at;SystemClock.now=now;j.fire();}now=target;SystemClock.now=now;}
     }
     static class Job implements ScheduledFuture<Object> {
         Runnable task;long at;boolean done,cancelled;
@@ -92,7 +100,7 @@ accept='acceptConnectionAttemptCallback' if ng else 'acceptConnectionStateChange
 body += f'\n boolean result(BluetoothGatt g,int state) {{ return {accept}(g,state); }}\n'
 body += r'''
     static void check(boolean b,String message){if(!b)throw new AssertionError(message);}
-    static SuperGattCallback fresh(){Applic.scheduler=new Scheduler();CloneSensorRegistry.clone=false;SensorOwnershipRuntime.blocked=false;SuperGattCallback cb=new SuperGattCallback();cb.connectDevice(0);Applic.scheduler.advance(0);check(cb.mActiveBluetoothDevice.calls==1,"initial connect");return cb;}
+    static SuperGattCallback fresh(){Applic.scheduler=new Scheduler();SystemClock.now=0L;CloneSensorRegistry.clone=false;SensorOwnershipRuntime.blocked=false;SuperGattCallback cb=new SuperGattCallback();cb.connectDevice(0);Applic.scheduler.advance(0);check(cb.mActiveBluetoothDevice.calls==1,"initial connect");return cb;}
     public static void main(String[] args){
         SuperGattCallback cb=fresh();BluetoothGatt old=cb.mBluetoothGatt;
         Applic.scheduler.advance(119999);check(cb.mActiveBluetoothDevice.calls==1,"deadline too early");
@@ -119,6 +127,10 @@ if ng:
         cb=fresh();cb.setPause(true);cb.setPause(false);Applic.scheduler.advance(120000);check(cb.mActiveBluetoothDevice.calls==1,"pause cancellation resurrected by resume");
         cb=fresh();CloneSensorRegistry.clone=true;Applic.scheduler.advance(120000);check(cb.mActiveBluetoothDevice.calls==1,"clone ownership ignored");
         cb=fresh();SensorOwnershipRuntime.blocked=true;Applic.scheduler.advance(120000);check(cb.mActiveBluetoothDevice.calls==1,"released ownership ignored");
+        cb=fresh();old=cb.mBluetoothGatt;cb.close();cb.connectDevice(300000);cb.connectDevice(0,true);Applic.scheduler.advance(0);check(cb.mActiveBluetoothDevice.calls==2,"force did not replace a far-future pending connect");
+        cb=fresh();old=cb.mBluetoothGatt;cb.close();cb.connectDevice(300000);Applic.scheduler.advance(300001);check(cb.mActiveBluetoothDevice.calls==2,"pending delayed connect never ran");
+        cb=fresh();old=cb.mBluetoothGatt;cb.close();cb.connectDevice(300000);int beforeSooner=cb.mActiveBluetoothDevice.calls;cb.connectDevice(0,false);Applic.scheduler.advance(0);check(cb.mActiveBluetoothDevice.calls==beforeSooner+1,"sooner request did not replace a later pending connect");
+        cb=fresh();old=cb.mBluetoothGatt;cb.close();cb.connectDevice(300000);SystemClock.now+=400000L;int beforeOverdue=cb.mActiveBluetoothDevice.calls;cb.connectDevice(0,false);Applic.scheduler.advance(0);check(cb.mActiveBluetoothDevice.calls==beforeOverdue+1,"overdue (frozen executor) pending connect blocked recovery");
 '''
 body += '\n System.out.println("PASS: production connect/deadline/close lifecycle, stale callbacks, cancellation and stop guards");\n}\n}\n'
 with tempfile.TemporaryDirectory(prefix='libre3-connect-') as d:

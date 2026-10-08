@@ -66,13 +66,66 @@ import static tk.glucodata.util.sleep;
 public class DexGattCallback extends SuperGattCallback {
 private static final long DEXCOM_WARMUP_MSEC = 30L * 60L * 1000L;
 private static final long DEXCOM_WARMUP_RETRY_SLACK_MSEC = 15_000L;
-private static final int DEXCOM_RESCAN_AFTER_TIMEOUTS = 2;
+/** Silent connectGatt() used to wait for LossOfSensorAlarm (~5.5 min). */
+private static final long DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS = 45_000L;
+/** BluetoothGatt.GATT_ERROR: the direct-connect 30s timer on pre-API 35 stacks. */
+private static final int GATT_ERROR_STATUS = 133;
 private boolean known=false;
+/**
+ * Set once a direct connect burned Android's 30-second timer without reaching the G7.
+ * 2026-10-08 phone trace: autoconnect=false produced first-callback times of 30068ms,
+ * 30039ms, 30049ms, 30043ms, 30042ms and 30024ms — all status 147 — while the sensor
+ * was only briefly advertising between 5-minute packets. A background connect keeps the
+ * address and links up when the G7 appears; clearing the address and scanning instead
+ * left 14 minutes of darkness while the phone was locked.
+ */
+private volatile boolean directConnectUnreachable = false;
+/** Mode of the attempt now in flight, set from useAutoConnect() at connectGatt time. */
+private volatile boolean lastAttemptUsedAutoConnect = false;
+/** True once this attempt has reported STATE_CONNECTED (even if we skip setup). */
+private boolean attemptEverConnected = false;
+    private static final String DEX_CONNECT_PREFS = "dex_connect";
+    private static final String DIRECT_CONNECT_UNREACHABLE_PREFIX = "direct_unreachable_";
+
+    /**
+     * Survive process death: otherwise every cold start burns another 30s direct
+     * connect before falling back to autoConnect (2026-10-08 trace, 10:37:21–51).
+     */
+    private boolean loadDirectConnectUnreachable() {
+        try {
+            return Applic.app.getSharedPreferences(DEX_CONNECT_PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(DIRECT_CONNECT_UNREACHABLE_PREFIX + SerialNumber, false);
+        } catch (Throwable th) {
+            Log.stack(LOG_ID, "loadDirectConnectUnreachable", th);
+            return false;
+        }
+    }
+
+    private void setDirectConnectUnreachable(boolean unreachable, String why) {
+        if (directConnectUnreachable == unreachable) {
+            return;
+        }
+        directConnectUnreachable = unreachable;
+        try {
+            Applic.app.getSharedPreferences(DEX_CONNECT_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(DIRECT_CONNECT_UNREACHABLE_PREFIX + SerialNumber, unreachable)
+                    .apply();
+        } catch (Throwable th) {
+            Log.stack(LOG_ID, "setDirectConnectUnreachable", th);
+        }
+        if (doLog) {
+            Log.i(LOG_ID, SerialNumber + " directConnectUnreachable=" + unreachable + " (" + why + ")");
+        }
+    }
+
     public DexGattCallback(String SerialNumber, long dataptr) {
         super(SerialNumber, dataptr, 0x40);
         known=dexKnownSensor(dataptr);
+        directConnectUnreachable = loadDirectConnectUnreachable();
 //        ownDeviceName=Natives.dexGetDeviceName(dataptr);
-        {if(doLog) {Log.d(LOG_ID, SerialNumber + " DexGattCallback(..)");};};
+        {if(doLog) {Log.d(LOG_ID, SerialNumber + " DexGattCallback(..) directConnectUnreachable="
+                + directConnectUnreachable);};};
         showtime=6*60*1000L;
     }
 
@@ -180,7 +233,36 @@ private void releaselock() {
 private int triedinvain=0;
 
 private boolean connected=false;
-private int connectionTimeouts=0;
+    /**
+     * Same lever Anytime measured: after a direct connect has already spent Android's
+     * 30-second timer, prefer a background connect to the known address over another
+     * direct attempt — or, worse, wiping the address and hoping a background scan
+     * catches a brief G7 advert.
+     */
+    @Override
+    protected boolean useAutoConnect() {
+        final boolean use = super.useAutoConnect() || directConnectUnreachable;
+        lastAttemptUsedAutoConnect = use;
+        return use;
+    }
+
+    private static boolean isConnectTimeoutStatus(int status) {
+        return status == BluetoothGatt.GATT_CONNECTION_TIMEOUT || status == GATT_ERROR_STATUS;
+    }
+
+    @Override
+    protected long connectionAttemptTimeoutMillis() {
+        // Background connect is the "wait for the next advertising window" mode: no
+        // callback is normal for up to a full G7 slot (~5 min). A short deadline there
+        // only churns GATT objects and can miss the window — the 2026-10-08 post-fix
+        // trace showed "no connection result before deadline" every 45s for five
+        // minutes, then success 21-25s after the last start. Direct connect already
+        // has Android's 30s timer (status 147); this deadline only unsticks a stack
+        // that reports nothing at all. LossOfSensorAlarm remains the outer bound on a
+        // background connect that never comes back.
+        return useAutoConnect() ? 0L : DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS;
+    }
+
     @SuppressLint("MissingPermission")
     @Override
     public void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
@@ -188,6 +270,9 @@ private int connectionTimeouts=0;
         if (stop) {
             releaselock();
             {if(doLog) {Log.i(LOG_ID, "onConnectionStateChange stop==true");};};
+            return;
+        }
+        if (!acceptConnectionAttemptCallback(bluetoothGatt, newState)) {
             return;
         }
         long tim = System.currentTimeMillis();
@@ -198,7 +283,12 @@ private int connectionTimeouts=0;
 
         }
         if(newState == BluetoothProfile.STATE_CONNECTED) {
-          connectionTimeouts=0;
+          attemptEverConnected = true;
+          if(!lastAttemptUsedAutoConnect) {
+              // Only a direct connect that actually reached the G7 is evidence that
+              // direct connects work again (same rule as AnytimeConnectModeState).
+              setDirectConnectUnreachable(false, "direct connect reached the sensor");
+          }
           if(bondstate == BluetoothDevice.BOND_BONDING) {
               {if(doLog) {Log.i(LOG_ID, "wait BOND_BONDING");};};
               }
@@ -231,18 +321,16 @@ private int connectionTimeouts=0;
                    {if(doLog) {Log.i(LOG_ID, "BOND_BONDING");};};
                    }
             if(newState == BluetoothProfile.STATE_DISCONNECTED) {
-              if(status == BluetoothGatt.GATT_CONNECTION_TIMEOUT) {
-                  ++connectionTimeouts;
-                  {if(doLog) {Log.i(LOG_ID, "Dexcom connection timeout count=" + connectionTimeouts);};};
-                  if(connectionTimeouts >= DEXCOM_RESCAN_AFTER_TIMEOUTS) {
-                      {if(doLog) {Log.i(LOG_ID, "Dexcom connection timeout: clear cached runtime address and rescan");};};
-                      searchforDeviceAddress();
-                      connectionTimeouts = 0;
-                  }
+              // A connect attempt that never reached the sensor burned Android's
+              // direct-connect timer. Switch to a background connect against the same
+              // address. Never searchforDeviceAddress() for this: the G7's identity
+              // address is stable (F0:72:4C:A4:92:09 in the 2026-10-08 trace), and
+              // replacing a dial with a scan misses brief adverts while the phone is
+              // locked — 14 minutes dark twice in that trace.
+              if(!attemptEverConnected && isConnectTimeoutStatus(status)) {
+                  setDirectConnectUnreachable(true, "direct connect timed out status=" + status);
               }
-              else {
-                  connectionTimeouts = 0;
-              }
+              attemptEverConnected = false;
               if(!stop) {
                   if(!known){
                       if(phase==GetData&&!removedBond) {
@@ -284,6 +372,11 @@ private int connectionTimeouts=0;
                   var sensorbluetooth = SensorBluetooth.blueone;
                   if (sensorbluetooth != null) {
                     if(justdata) {
+                        // A delivered reading ends with the G7 dropping the link (status 19)
+                        // and going quiet until the next 5-minute slot. The next dial must
+                        // wait for that advert (autoConnect), not burn Android's 30s
+                        // direct-connect timer on silence.
+                        setDirectConnectUnreachable(true, "reading delivered; sensor goes quiet");
                         Applic.wakemirrors();
 //                        long alreadywaited = tim - constatchange[0];
                         final long alreadywaited = tim - datatime;
@@ -292,30 +385,20 @@ private int connectionTimeouts=0;
                             {if(doLog) {Log.i(LOG_ID, "warmup alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
                             if(stillwait < 0L)
                                 stillwait = 0L;
-                            if(getalarmclock()) {
-                                if(stillwait > 0L)
-                                    onalarm=setalarm(tim+stillwait,onalarm,SerialNumber );
-                                 else
-                                    sensorbluetooth.connectToActiveDevice(this, 0);
-                            } else {
-                                sensorbluetooth.connectToActiveDevice(this, stillwait);
-                            }
+                            scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         }
                         else if(getalarmclock()) {
                             //long stillwait=justdata?(6700-alreadywaited):0;
                             final long mmsectimebetween = 5 * 60 * 1000;
                             long stillwait = mmsectimebetween - alreadywaited - 27500;
                             {if(doLog) {Log.i(LOG_ID, "justdata=" + justdata + " alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
-                            if(stillwait>0)
-                                onalarm=setalarm(tim+stillwait,onalarm,SerialNumber );
-                             else
-                                sensorbluetooth.connectToActiveDevice(this, 0);
+                            scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         } else {
                             long stillwait = 7000 - alreadywaited;
                             {if(doLog) {Log.i(LOG_ID, "alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
-                            if(stillwait<0) 
+                            if(stillwait<0)
                                 stillwait=0;
-                            sensorbluetooth.connectToActiveDevice(this, stillwait);
+                            scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         }
                     }
                     else {
@@ -1047,6 +1130,26 @@ static private PendingIntent mkintents(Context context,String id,int alarmreques
      }
 private PendingIntent onalarm=null;
 static private int alarmrequest=14;
+
+/**
+ * Schedule the next G7 connect with AlarmManager, never a multi-minute executor delay.
+ * A ScheduledExecutorService does not run while the CPU is suspended, so a locked phone
+ * would miss the advertising window — and with a pending connect latch held, would also
+ * block LossOfSensorAlarm recovery.
+ */
+private void scheduleDexReconnect(SensorBluetooth sensorbluetooth, long tim, long stillwait) {
+    if (stillwait <= 0L) {
+        sensorbluetooth.connectToActiveDevice(this, 0);
+        return;
+    }
+    onalarm = setalarm(tim + stillwait, onalarm, SerialNumber);
+    if (onalarm == null) {
+        // AlarmManager refused: try again soon rather than leaving no scheduled recovery.
+        {if(doLog) {Log.i(LOG_ID, "setalarm failed; fallback connect in 30s");};};
+        sensorbluetooth.connectToActiveDevice(this, 30_000L);
+    }
+}
+
 static  PendingIntent  setalarm(long alarmtime,PendingIntent onalarm,String SerialNumber) {
     try {
             Context context=Applic.app;
@@ -1054,7 +1157,15 @@ static  PendingIntent  setalarm(long alarmtime,PendingIntent onalarm,String Seri
                onalarm= mkintents(context,SerialNumber,alarmrequest);
             {if(doLog) {Log.i(LOG_ID,"setalarm "+alarmtime);};};
             AlarmManager manager= (AlarmManager) context.getSystemService(ALARM_SERVICE);
-            manager.setAlarmClock(new AlarmManager.AlarmClockInfo(alarmtime, onalarm), onalarm);
+            try {
+                manager.setAlarmClock(new AlarmManager.AlarmClockInfo(alarmtime, onalarm), onalarm);
+                }
+            catch(Throwable primary) {
+                // setAlarmClock is normally unrestricted; fall back to an idle-allowed
+                // exact alarm rather than leaving the sensor with no scheduled reconnect.
+                Log.stack(LOG_ID,"setAlarmClock", primary);
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmtime, onalarm);
+                }
             return onalarm;
             }
        catch(Throwable e) {

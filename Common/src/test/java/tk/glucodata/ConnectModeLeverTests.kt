@@ -66,11 +66,15 @@ class ConnectModeLeverTests {
         // R2(a) is a lever, not a change of behaviour: an override appearing here means some
         // driver now connects in a mode the 2026-08-01 dataset never measured. The Anytime
         // files are listed because the 2026-09-09 CT5 trace did measure it — see the next test
-        // for what that override is still held to.
+        // for what that override is still held to. DexGattCallback is listed for the
+        // 2026-10-08 G7 phone trace: autoconnect=false produced first-callback times of
+        // 30068ms, 30039ms, 30049ms, 30043ms, 30042ms and 30024ms — all status 147 —
+        // while the sensor was only briefly advertising between 5-minute packets.
         val measured = setOf(
             "AnytimeBleManager.kt",
             "AnytimeConnectRetryPolicy.kt",
             "AnytimeConnectRetryPolicyTests.kt",
+            "DexGattCallback.java",
         )
         val overriders = sources("Common/src")
             .filter { it.name != "SuperGattCallback.java" && it.name != "ConnectModeLeverTests.kt" }

@@ -85,6 +85,18 @@ public class SensorBluetooth {
 
     // public Applic Applic.app;
     static private BluetoothAdapter mBluetoothAdapter;
+
+    /** Adapter for callers that must rebuild a BluetoothDevice without a live scan. */
+    static synchronized BluetoothAdapter adapterOrNull() {
+        if (mBluetoothAdapter == null && mBluetoothManager != null) {
+            try {
+                mBluetoothAdapter = mBluetoothManager.getAdapter();
+            } catch (Throwable th) {
+                Log.stack(LOG_ID, "adapterOrNull", th);
+            }
+        }
+        return mBluetoothAdapter;
+    }
     private BroadcastReceiver mBluetoothAdapterReceiver = null;;
     static private BluetoothManager mBluetoothManager = null;
 
@@ -1467,7 +1479,9 @@ public class SensorBluetooth {
     public void connectNamedDevice(String id, long delayMillis) {
         for (var cb : gattcallbacks) {
             if (callbackMatchesSensorId(cb, id)) {
-                if (!cb.connectDevice(delayMillis)) {
+                // ConnectReceiver / AlarmManager wakeups must replace a frozen delayed
+                // connect rather than being skipped by the pending-connect latch.
+                if (!cb.connectDevice(delayMillis, true)) {
                     scanStarter(delayMillis);
                 }
                 return;

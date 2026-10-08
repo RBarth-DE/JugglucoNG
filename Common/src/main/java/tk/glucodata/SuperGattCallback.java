@@ -21,6 +21,7 @@
 package tk.glucodata;
 
 import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
@@ -30,6 +31,7 @@ import android.bluetooth.le.ScanResult;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.SystemClock;
 
 import androidx.annotation.Keep;
 
@@ -103,8 +105,13 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     long foundtime = 0L;
     protected volatile BluetoothGatt mBluetoothGatt;
     private volatile BluetoothGatt locallyConnectedGatt;
+    private static final long DISCONNECT_CALLBACK_TIMEOUT_MS = 2000L;
     private volatile boolean connectPending = false;
     private volatile ScheduledFuture<?> pendingConnectFuture = null;
+    /** elapsedRealtime() at which a pending connect runnable is due; 0 when none. */
+    private volatile long connectPendingAtElapsed = 0L;
+    private long reconnectGeneration = 0L;
+    private BluetoothGatt reconnectWaitingGatt = null;
     /** connectGatt() timestamp of the attempt now in flight, cleared by the first callback the
      * stack delivers for it. Zero means "already reported", so a live connection pays one
      * volatile read per callback and nothing else. */
@@ -133,17 +140,27 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || SensorOwnershipRuntime.blocksLocalConnection(SerialNumber)) return;
         Log.i(LOG_ID, SerialNumber + " no connection result before deadline; retrying");
         closeGattTransport();
-        connectDevice(0);
+        connectDevice(0, true);
     }
 
     protected final synchronized boolean acceptConnectionAttemptCallback(BluetoothGatt gatt, int state) {
         if (gatt != mBluetoothGatt) {
             Log.i(LOG_ID, SerialNumber + " ignore retired connection callback");
+            try {
+                gatt.close();
+            } catch (Throwable th) {
+                Log.stack(LOG_ID, SerialNumber + " close stale gatt", th);
+            }
             return false;
         }
         if (state == android.bluetooth.BluetoothProfile.STATE_CONNECTED
                 || state == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
             connectDeadline.completed(gatt);
+            if (state == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED
+                    && reconnectWaitingGatt == gatt) {
+                reconnectWaitingGatt = null;
+                ++reconnectGeneration;
+            }
         }
         return !stop;
     }
@@ -177,6 +194,14 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 && locallyConnectedGatt == gatt) {
             locallyConnectedGatt = null;
             WearSensorClaim.onLocalGattDisconnected(SerialNumber);
+        }
+        if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+            synchronized (this) {
+                if (reconnectWaitingGatt == gatt) {
+                    reconnectWaitingGatt = null;
+                    ++reconnectGeneration;
+                }
+            }
         }
     }
 
@@ -277,23 +302,57 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     public boolean reconnect(long now) {
         final var old = now - showtime + 20;
         if (charcha[1] < old && connectTime < (now - 60 * 1000)) {
+            final BluetoothGatt thegatt;
+            final long generation;
             try {
                 if (doLog) {
                     Log.i(LOG_ID, "reconnect " + SerialNumber);
                 }
                 ;
                 noteLossOfSignal(now);
-                final var thegatt = mBluetoothGatt;
-                if (thegatt != null) {
-                    thegatt.disconnect();
+                synchronized (this) {
+                    thegatt = mBluetoothGatt;
+                    if (thegatt == null) {
+                        return connectDevice(0, true);
+                    }
+                    reconnectWaitingGatt = thegatt;
+                    generation = ++reconnectGeneration;
                 }
+                thegatt.disconnect();
+                // Some Android Bluetooth stacks occasionally fail to deliver the
+                // DISCONNECTED callback after disconnect(). Normally that callback
+                // starts the replacement connection. Only if it never arrives do
+                // this timeout path replace the GATT.
+                Applic.scheduler.schedule(
+                        () -> reconnectWithoutDisconnectCallback(thegatt, generation),
+                        DISCONNECT_CALLBACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                return true;
             } catch (Throwable th) {
                 Log.stack(LOG_ID, "reconnect", th);
-            } finally {
-                return connectDevice(0);
+                close();
+                return connectDevice(0, true);
             }
         }
         return true;
+    }
+
+    private void reconnectWithoutDisconnectCallback(BluetoothGatt oldGatt, long generation) {
+        synchronized (this) {
+            if (generation != reconnectGeneration || reconnectWaitingGatt != oldGatt
+                    || mBluetoothGatt != oldGatt)
+                return;
+            reconnectWaitingGatt = null;
+            ++reconnectGeneration;
+            mBluetoothGatt = null;
+        }
+        if (doLog)
+            Log.i(LOG_ID, SerialNumber + " no DISCONNECTED callback; force reconnect");
+        try {
+            oldGatt.close();
+        } catch (Throwable th) {
+            Log.stack(LOG_ID, SerialNumber + " close after missing DISCONNECTED", th);
+        }
+        connectDevice(0, true);
     }
 
     void setConStatus(int status) {
@@ -1246,6 +1305,10 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     public final synchronized void closeGattTransport() {
         connectDeadline.cancel();
         clearPendingConnect();
+        if (reconnectWaitingGatt != null) {
+            reconnectWaitingGatt = null;
+            ++reconnectGeneration;
+        }
         {
             if (doLog) {
                 Log.i(LOG_ID, "close " + SerialNumber);
@@ -1340,6 +1403,64 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         }
     }
 
+    /**
+     * Rebuild {@link #mActiveBluetoothDevice} from whatever still identifies the sensor.
+     * <p>
+     * searchforDeviceAddress() only nulls the address string and leaves the BluetoothDevice
+     * behind, and a process restart can come back with one of the two. The old check
+     * required both and fell through to a scan, so after a timeout-driven address wipe
+     * reconnectall could no longer dial the G7 it already had a handle for — the
+     * 2026-10-08 trace sat in a scan-only hole until a scan hit. Any one of the address
+     * string, the device object, or the native store is enough to dial.
+     */
+    private synchronized boolean resolveActiveDevice() {
+        if (mActiveBluetoothDevice != null) {
+            if (mActiveDeviceAddress == null) {
+                try {
+                    mActiveDeviceAddress = mActiveBluetoothDevice.getAddress();
+                } catch (Throwable th) {
+                    Log.stack(LOG_ID, SerialNumber + " getAddress from device", th);
+                }
+            }
+            return true;
+        }
+        String address = mActiveDeviceAddress;
+        if (address == null && dataptr != 0L) {
+            try {
+                // getnew=true hides a stored Dexcom address unless scannedAddress is
+                // set, and that flag is not persisted across process death — so a
+                // restart came back with "new SuperGattCallback … null" and could only
+                // scan. Ask for the stored address; fall back to the getnew form.
+                address = Natives.getDeviceAddress(dataptr, false);
+                if (address == null) {
+                    address = Natives.getDeviceAddress(dataptr, true);
+                }
+            } catch (Throwable th) {
+                Log.stack(LOG_ID, SerialNumber + " getDeviceAddress", th);
+            }
+            if (address != null) {
+                mActiveDeviceAddress = address;
+                if (doLog) {
+                    Log.i(LOG_ID, SerialNumber + " restored address from native store " + address);
+                }
+            }
+        }
+        if (address == null) {
+            return false;
+        }
+        try {
+            final BluetoothAdapter adapter = SensorBluetooth.adapterOrNull();
+            if (adapter == null) {
+                return false;
+            }
+            mActiveBluetoothDevice = adapter.getRemoteDevice(address);
+            return mActiveBluetoothDevice != null;
+        } catch (Throwable th) {
+            Log.stack(LOG_ID, SerialNumber + " getRemoteDevice(" + address + ")", th);
+            return false;
+        }
+    }
+
     private Runnable getConnectDevice() {
         var cb = this;
         if (cb.mBluetoothGatt != null) {
@@ -1351,7 +1472,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 Log.d(LOG_ID, SerialNumber + " getConnectDevice: clearing stale mBluetoothGatt");
             closeGattTransport();
         }
-        if (cb.mActiveDeviceAddress == null || cb.mActiveBluetoothDevice == null) {
+        if (!cb.resolveActiveDevice()) {
             {
                 if (doLog) {
                     Log.i(LOG_ID, SerialNumber + " " + "cb.mActiveBluetoothDevice == null");
@@ -1475,6 +1596,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
 
     private synchronized void clearPendingConnect() {
         connectPending = false;
+        connectPendingAtElapsed = 0L;
         if (pendingConnectFuture != null) {
             pendingConnectFuture.cancel(false);
             pendingConnectFuture = null;
@@ -1482,8 +1604,22 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     }
 
     public synchronized boolean connectDevice(long delayMillis) {
+        return connectDevice(delayMillis, false);
+    }
+
+    /**
+     * Queue a connect attempt.
+     * <p>
+     * A delayed attempt used to block every later dial until its executor task ran. When the
+     * phone is locked that task does not run — a ScheduledExecutorService is frozen with the
+     * CPU — so LossOfSensorAlarm, ConnectReceiver and a scan hit could all skip with "connect
+     * already pending" and the sensor stayed dark until the process died. Keep the latch that
+     * stops connectGatt() stacking, but let a sooner request replace a later one, let an
+     * overdue one be replaced, and let recovery ({@code force}) always replace.
+     */
+    public synchronized boolean connectDevice(long delayMillis, boolean force) {
         if (doLog) {
-            Log.i(LOG_ID, "connectDevice(" + delayMillis + ") " + SerialNumber);
+            Log.i(LOG_ID, "connectDevice(" + delayMillis + ", force=" + force + ") " + SerialNumber);
         }
         ;
         if (stop || CloneSensorRegistry.isCloneSensor(SerialNumber)
@@ -1491,23 +1627,29 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || (dataptr == 0L && !allowConnectWithoutDataptr())) {
             return false;
         }
+        final long delay = Math.max(0L, delayMillis);
         if (connectPending) {
-            if (doLog) {
-                Log.i(LOG_ID, "connectDevice skipped, connect already pending for " + SerialNumber);
+            final long now = SystemClock.elapsedRealtime();
+            final boolean overdue = connectPendingAtElapsed <= now;
+            final boolean sooner = (now + delay) < connectPendingAtElapsed;
+            if (!force && !overdue && !sooner) {
+                if (doLog) {
+                    Log.i(LOG_ID, "connectDevice skipped, connect already pending for " + SerialNumber);
+                }
+                return true;
             }
-            return true;
+            if (doLog) {
+                Log.i(LOG_ID, "connectDevice replacing pending connect for " + SerialNumber
+                        + " force=" + force + " overdue=" + overdue + " sooner=" + sooner);
+            }
+            clearPendingConnect();
         }
         Runnable connect = getConnectDevice();
         if (connect == null)
             return false;
         connectPending = true;
-        pendingConnectFuture = Applic.scheduler.schedule(connect, delayMillis, TimeUnit.MILLISECONDS);
-        /*
-         * if(delayMillis>0)
-         * Applic.app.getHandler().postDelayed(connect, delayMillis);
-         * else
-         * Applic.app.getHandler().post(connect);
-         */
+        connectPendingAtElapsed = SystemClock.elapsedRealtime() + delay;
+        pendingConnectFuture = Applic.scheduler.schedule(connect, delay, TimeUnit.MILLISECONDS);
         return true;
     }
 
