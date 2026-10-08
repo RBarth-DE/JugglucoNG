@@ -604,17 +604,19 @@ object OttaiRegistry {
         )
 
     /**
-     * Commit the realtime claim before handing it to alert/voice/exchange consumers. Manager
-     * recreation can follow a sensor handoff immediately, and an asynchronous preference write
-     * would reopen the duplicate window this high-water closes.
+     * Update the process-visible claim immediately and persist it without blocking the Android
+     * GATT callback. A recreated manager in this process observes the value as soon as apply
+     * returns.
      */
-    @JvmStatic fun saveLastPublishedGlucoseAtMs(c: Context, id: String, sampleMs: Long): Boolean =
+    @JvmStatic fun saveLastPublishedGlucoseAtMs(c: Context, id: String, sampleMs: Long): Boolean {
         prefs(c).edit()
             .putLong(
                 OttaiConstants.PREF_LAST_PUBLISHED_GLUCOSE_PREFIX + OttaiConstants.canonicalSensorId(id),
                 sampleMs,
             )
-            .commit()
+            .apply()
+        return true
+    }
 
     /**
      * The sensor's learned BLE record layout, 0 when nothing has proved one yet.
