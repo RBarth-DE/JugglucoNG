@@ -193,8 +193,8 @@ class AirGattCallback extends SuperGattCallback {
         if (unusedSensor)
             buf[34] = 1;
         charact22.setValue(buf);
-        bluetoothGatt.writeCharacteristic(charact22);
         receiveNotes = false;
+        bluetoothGatt.writeCharacteristic(charact22);
     }
 
     private PendingIntent onalarm = null;
