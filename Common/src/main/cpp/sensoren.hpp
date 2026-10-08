@@ -644,7 +644,7 @@ public:
            payload.substr(0, manualDexcomPrefix.size()) == manualDexcomPrefix;
   }
 
-  sensor *findActiveManualDexcom(const char *pin) {
+  sensor *findUnboundManualDexcom(const char *pin) {
     for (int index = last(); index >= 0; --index) {
       sensor *candidate = getsensor(index);
       if (!candidate->present || candidate->finished)
@@ -653,7 +653,13 @@ public:
       if (!data || !data->isDexcom())
         continue;
       const auto *info = data->getinfo();
-      if (!info || info->siIdlen != 55 ||
+      // The PIN is not a sensor identity. Reuse it only to recover an empty,
+      // unbound record left by interrupted setup; an established sensor with
+      // the same PIN must retain its own identity, key, and history.
+      if (!info || info->pollcount || info->scancount || info->endhistory ||
+          info->DexDeviceName[0] ||
+          info->sharedKey != std::array<uint8_t, 16>{} ||
+          info->siIdlen != 55 ||
           memcmp(info->siId, manualDexcomPrefix.data(),
                  manualDexcomPrefix.size()))
         continue;
@@ -691,9 +697,9 @@ public:
     removeunused();
     sensor *sensgegs = findsensorm(std::string_view(name.data(), name.size()));
     if (!sensgegs && isManualDexcomPayload(gegs)) {
-      sensgegs = findActiveManualDexcom(pin);
+      sensgegs = findUnboundManualDexcom(pin);
       if (sensgegs)
-        LOGGER("manual Dexcom retry uses active sensor %s\n",
+        LOGGER("manual Dexcom retry uses unbound sensor %s\n",
                sensgegs->showsensorname());
     }
     if (sensgegs) {

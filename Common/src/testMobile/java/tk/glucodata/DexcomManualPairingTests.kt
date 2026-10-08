@@ -53,15 +53,19 @@ class DexcomManualPairingTests {
     }
 
     @Test
-    fun `manual retry lookup requires an unfinished manual dexcom with the same pin`() {
+    fun `manual retry lookup never reuses an established same pin sensor`() {
         val nativeSource = File(projectRoot(), "Common/src/main/cpp/sensoren.hpp").readText()
         val lookup = nativeSource.substring(
-            nativeSource.indexOf("sensor *findActiveManualDexcom"),
-            nativeSource.indexOf("makeDexComSensorindex", nativeSource.indexOf("sensor *findActiveManualDexcom")),
+            nativeSource.indexOf("sensor *findUnboundManualDexcom"),
+            nativeSource.indexOf("makeDexComSensorindex", nativeSource.indexOf("sensor *findUnboundManualDexcom")),
         )
+        val normalizedLookup = lookup.replace(Regex("\\s+"), " ")
 
         assertTrue(lookup.contains("candidate->finished"))
         assertTrue(lookup.contains("data->isDexcom()"))
+        assertTrue(normalizedLookup.contains("info->pollcount || info->scancount || info->endhistory"))
+        assertTrue(lookup.contains("info->DexDeviceName[0]"))
+        assertTrue(lookup.contains("info->sharedKey != std::array<uint8_t, 16>{}"))
         assertTrue(lookup.contains("manualDexcomPrefix"))
         assertTrue(lookup.contains("data->getDexPin()"))
         assertTrue(lookup.contains("memcmp(storedPin.data(), pin, storedPin.size())"))

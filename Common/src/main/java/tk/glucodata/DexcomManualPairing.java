@@ -39,9 +39,9 @@ public final class DexcomManualPairing {
 
     /**
      * Returns a payload accepted by the existing native QR parser, or {@code null} for invalid
-     * input. Native pairing reuses an unfinished manual record with the same PIN for retries; a
-     * genuinely new sensor receives a random, clock-independent identity here so clock rollback
-     * cannot make it reopen an older record.
+     * input. Native pairing may reuse an unfinished, data-empty and unbound manual record with the
+     * same PIN after interrupted setup; a genuinely new sensor receives a random,
+     * clock-independent identity here so clock rollback cannot make it reopen an older record.
      */
     public static String createScanPayload(String rawCode) {
         return createScanPayload(rawCode, createSensorId(sensorIdRandom));
