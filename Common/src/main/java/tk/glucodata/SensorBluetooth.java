@@ -1749,6 +1749,9 @@ public class SensorBluetooth {
                 if (vers == 0x20) {
                     return new AccuGattCallback(name, dataptr);
                 }
+                if (vers == SensorSourceResolver.SENSOR_KIND_CARESENS_AIR) {
+                    return new AirGattCallback(name, dataptr);
+                }
             }
             if (tk.glucodata.BuildConfig.SiBionics == 1) {
                 if (vers == 0x10) {
@@ -2034,15 +2037,30 @@ public class SensorBluetooth {
             pairingRequestReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    {
+                    try {
+                        final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                        final String address = device != null ? device.getAddress() : null;
                         if (doLog) {
-                            Log.i(LOG_ID, "onReceive ACTION_PAIRING_REQUEST");
+                            Log.i(LOG_ID, "onReceive ACTION_PAIRING_REQUEST " + address);
                         }
-                        ;
+                        if (address == null) {
+                            return;
+                        }
+                        for (var cb : gattcallbacks) {
+                            if (address.equals(cb.mActiveDeviceAddress)) {
+                                // Sensors that pair with a PIN (CareSens Air) answer it themselves.
+                                if (cb.pairingRequest())
+                                    abortBroadcast();
+                                return;
+                            }
+                        }
+                    } catch (Throwable th) {
+                        Log.stack(LOG_ID, "ACTION_PAIRING_REQUEST", th);
                     }
-                    ;
                 }
             };
+            // Protected system broadcasts are exempt from Android 14's export-flag
+            // requirement. NOT_EXPORTED would also reject the Bluetooth process.
             Applic.app.registerReceiver(pairingRequestReceiver,
                     new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST));
         } catch (Throwable e) {
@@ -2066,15 +2084,13 @@ public class SensorBluetooth {
     private void addReceivers() {
         addBluetoothStateReceiver();
         addBondStateReceiver();
-        if (Build.VERSION.SDK_INT < 26)
-            addPairingRequestReceiver();
+        addPairingRequestReceiver();
     }
 
     private void removeReceivers() {
         removeBluetoothStateReceiver();
         removeBondStateReceiver();
-        if (Build.VERSION.SDK_INT < 26)
-            removePairingRequestReceiver();
+        removePairingRequestReceiver();
     }
 
     private BroadcastReceiver bondStateReceiver = null;

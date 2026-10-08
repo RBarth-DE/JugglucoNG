@@ -27,4 +27,10 @@ public class SensorSourceResolverTests {
         assertEquals("Libre3", SensorSourceResolver.resolveXdripSourceInfo(null, SensorSourceResolver.SENSOR_KIND_LIBRE3));
         assertEquals("G7", SensorSourceResolver.resolveXdripSourceInfo(null, SensorSourceResolver.SENSOR_KIND_DEXCOM));
     }
+
+    @Test
+    public void xdripSourceInfoNamesCareSensAirLikeUpstream() {
+        assertEquals("CareSenseAir",
+                SensorSourceResolver.resolveXdripSourceInfo(null, SensorSourceResolver.SENSOR_KIND_CARESENS_AIR));
+    }
 }
