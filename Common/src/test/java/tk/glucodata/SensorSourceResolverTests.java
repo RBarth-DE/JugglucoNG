@@ -85,4 +85,10 @@ public class SensorSourceResolverTests {
         assertEquals(SensorSourceResolver.SENSOR_KIND_DEXCOM,
                 SensorSourceResolver.kindForSnapshot(SensorSourceResolver.SENSOR_KIND_DEXCOM, 0));
     }
+
+    @Test
+    public void xdripSourceInfoNamesCareSensAirLikeUpstream() {
+        assertEquals("CareSenseAir",
+                SensorSourceResolver.resolveXdripSourceInfo(null, SensorSourceResolver.SENSOR_KIND_CARESENS_AIR));
+    }
 }

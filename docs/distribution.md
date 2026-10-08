@@ -167,7 +167,7 @@ regular release, publication has no approval gate: requesting unattended nightli
 authorizes publication of these trusted main snapshots. PR signing still requires
 its separate owner gate. No new secrets are needed.
 
-The **seven most recent published nightlies** are retained. Cleanup deletes only
+The **three most recent published nightlies** are retained. Cleanup deletes only
 this automation's marked, dated prereleases and their tags; it preserves regular
 releases, unrelated prereleases, drafts, and any pinned vendor baseline. Retention
 also runs on skipped-build days so failed cleanup can recover. This keeps normal
@@ -226,16 +226,17 @@ These are the exact ignored inputs consumed by `build-dist.sh all` to reproduce
 its existing JNI payload, including legacy libraries that may no longer have an
 active sensor caller. This change does not remove or reinterpret those libraries.
 
-Every file matches byte-for-byte the corresponding entry in **all four** existing
-1.2.2-Alpha APKs. Restoration downloads the already-public primary phone APK,
-checks its pinned SHA-256 (`ec2d0acfe564c24623ab2e22b83a76864210c39e19e0c9ca0bd0026622abac00`),
+Those initial files matched byte-for-byte the corresponding entries in **all four**
+1.2.2-Alpha APKs. The current baseline is the published **1.2.3-Alpha** primary phone
+APK, adding `libCALCULATION.so` for both ARM ABIs: **34 files / 44,216,417 bytes**.
+Restoration downloads that APK and checks its whole-file SHA-256 from the inventory,
 then extracts only explicitly named library entries and checks size/hash again.
 No dynamic library from dependency AARs or locally compiled `libg.so`/`libnative.so`
 is extracted. `--apk <downloaded-source.apk>` supports offline restoration.
 An existing different local file is never overwritten.
 
-No private assets repo, download token, secret archive or new proprietary upload
-is needed. Keep that historical release asset available: a missing or changed
+No private assets repo, download token, secret archive or standalone binary upload
+is needed. Keep the pinned release asset available: a missing or changed
 source fails closed. Use the lifecycle commands below when legitimate input versions change; do not
 edit hashes by hand or silently follow the latest release. File hashes
 are public metadata, not binary contents or credentials.
@@ -249,10 +250,11 @@ part of the distribution. The redundant `src/libre3/jniLibs` source is inactive;
 Sibionics vendor exclusion patterns contribute no files in the active inventory.
 Public native source/submodule and Maven dependencies supply all other inputs.
 
-**Licensing is unresolved:** the checkout does not provide redistribution grants
-or exact source-app provenance for these vendor inputs. Existing public APKs prove
-availability and byte identity, not permission. The licensing flag deliberately
-requires the owner to resolve that decision before new APK distribution.
+The owner has enabled the redistribution approval flag and, on 2026-10-07,
+explicitly confirmed redistribution rights for the two `libCALCULATION.so` copies
+supplied from Juggluco 11.3.0-log. This records the owner's authorization; existing
+public APKs and checksums alone do not establish licensing rights. Review rights
+and provenance again when adding or replacing vendor inputs.
 
 Two other ignored local inputs exist: `net/ICE/turnservers.local.hpp` and
 `twilio.local.hpp`. They are optional credential overrides, **not required build
@@ -323,6 +325,14 @@ fresh checkout before restoring. Keep removal entries until the file is explicit
 re-added by the updater; they prevent stale packaging even after rebasing.
 
 ### Example: CareSens Air (`libCALCULATION.so`, PR #542)
+
+The vendor-only bootstrap below is now complete: the owner-authorized copies are
+inside the published 1.2.3-Alpha prerelease and pinned in the inventory. Fresh
+checkouts can run `scripts/restore-build-inputs.sh` normally. Rebase the driver PR
+onto this baseline, request `/build-dist phone` on that PR and approve its exact
+head to test it before merging the driver. The baseline release itself contains
+the libraries but does **not** include the Air driver. The following describes
+the procedure used to establish it, and applies to the next new library/hash.
 
 Rebase the driver PR onto current main first so it contains the current canonical
 build scripts. In that checkout, restore the existing inputs **before** adding
