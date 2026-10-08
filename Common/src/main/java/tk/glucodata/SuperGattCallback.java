@@ -1697,6 +1697,14 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     public void bonded() {
     }
 
+    /**
+     * ACTION_PAIRING_REQUEST for this callback's device. Return true after answering it
+     * (setPin), so the system pairing dialog is suppressed.
+     */
+    public boolean pairingRequest() {
+        return false;
+    }
+
     public String mygetDeviceName() {
         if (mDeviceName != null)
             return mDeviceName;

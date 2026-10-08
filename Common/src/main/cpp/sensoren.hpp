@@ -636,6 +636,40 @@ public:
   }
 #endif
 #ifdef DEXCOM
+  static constexpr std::string_view manualDexcomPrefix =
+      "JUGGLUCO-MANUAL-G7:";
+
+  static bool isManualDexcomPayload(std::string_view payload) {
+    return payload.size() == 55 &&
+           payload.substr(0, manualDexcomPrefix.size()) == manualDexcomPrefix;
+  }
+
+  sensor *findUnboundManualDexcom(const char *pin) {
+    for (int index = last(); index >= 0; --index) {
+      sensor *candidate = getsensor(index);
+      if (!candidate->present || candidate->finished)
+        continue;
+      SensorGlucoseData *data = getSensorData(index);
+      if (!data || !data->isDexcom())
+        continue;
+      const auto *info = data->getinfo();
+      // The PIN is not a sensor identity. Reuse it only to recover an empty,
+      // unbound record left by interrupted setup; an established sensor with
+      // the same PIN must retain its own identity, key, and history.
+      if (!info || info->pollcount || info->scancount || info->endhistory ||
+          info->DexDeviceName[0] ||
+          info->sharedKey != std::array<uint8_t, 16>{} ||
+          info->siIdlen != 55 ||
+          memcmp(info->siId, manualDexcomPrefix.data(),
+                 manualDexcomPrefix.size()))
+        continue;
+      const auto storedPin = data->getDexPin();
+      if (!memcmp(storedPin.data(), pin, storedPin.size()))
+        return candidate;
+    }
+    return nullptr;
+  }
+
   std::pair<int, SensorGlucoseData *>
   makeDexComSensorindex(const char *pin, std::string_view gegs, uint32_t now) {
     std::array<char, 16> name;
@@ -661,8 +695,14 @@ public:
     std::copy_n(pin, 4, name.data() + 12);
     LOGGER("makeDexComSensorindex %s name=%.16s\n", pin, name.data());
     removeunused();
-    if (sensor *sensgegs =
-            findsensorm(std::string_view(name.data(), name.size()))) {
+    sensor *sensgegs = findsensorm(std::string_view(name.data(), name.size()));
+    if (!sensgegs && isManualDexcomPayload(gegs)) {
+      sensgegs = findUnboundManualDexcom(pin);
+      if (sensgegs)
+        LOGGER("manual Dexcom retry uses unbound sensor %s\n",
+               sensgegs->showsensorname());
+    }
+    if (sensgegs) {
       LOGGER("known sensor %s\n", sensgegs->showsensorname());
       const int sensindex = sensgegs - sensorlist();
       SensorGlucoseData *sens = getSensorData(sensindex);
@@ -754,13 +794,83 @@ private:
     return {ind, getSensorData(ind)};
   }
 
+  // A CareSens Air scan in PhotoScan's canonical framing, or null. Strict on
+  // purpose: the record is stored as is and the pairing PIN is read back from
+  // a fixed offset.
+  static const careSenseAirScan_t *asCareSensAirScan(std::string_view scanned) {
+    if (scanned.size() != sizeof(careSenseAirScan_t))
+      return nullptr;
+    const auto *scan =
+        reinterpret_cast<const careSenseAirScan_t *>(scanned.data());
+    const auto digits = [](const char *field, size_t len) {
+      return std::all_of(field, field + len,
+                         [](char c) { return c >= '0' && c <= '9'; });
+    };
+    // GS1 dates and the GTIN are digits; the rest only has to be printable.
+    const auto printable = [](const char *field, size_t len) {
+      return std::all_of(field, field + len,
+                         [](char c) { return isgraph((unsigned char)c); });
+    };
+    // AI 21 and 240 are variable length, so a GS ends each before the next AI.
+    const auto ai = [](const char *field, const char *expected) {
+      return !memcmp(field, expected, strlen(expected));
+    };
+    if (!ai(scan->start, "\x1D"
+                         "01") ||
+        !ai(scan->tus17, "17") || !ai(scan->tus21, "21") ||
+        !ai(scan->start2, "\x1D"
+                          "240") ||
+        !ai(scan->start3, "\x1D"
+                          "250"))
+      return nullptr;
+    if (!digits(scan->gtin, sizeof(scan->gtin)) ||
+        !digits(scan->expiry, sizeof(scan->expiry)) ||
+        !printable(scan->serial, sizeof(scan->serial)) ||
+        !printable(scan->pinCode, sizeof(scan->pinCode)) ||
+        !printable(scan->sensorCode, sizeof(scan->sensorCode)))
+      return nullptr;
+    return scan;
+  }
+  // Named <expiry YYMM><serial>, as upstream Juggluco does.
+  std::pair<int, SensorGlucoseData *>
+  makeAirSensorindex(const careSenseAirScan_t &scan, uint32_t now) {
+    std::array<char, 16> longname;
+    memcpy(longname.data(), scan.expiry, 4);
+    memcpy(longname.data() + 4, scan.serial, sizeof(scan.serial));
+    const std::string_view name(longname.data(), longname.size());
+    LOGGER("makeAirSensorindex %.16s\n", longname.data());
+    removeunused();
+    if (sensor *sensgegs = findsensorm(name)) {
+      LOGGER("known sensor %s\n", sensgegs->showsensorname());
+      const int sensindex = sensgegs - sensorlist();
+      SensorGlucoseData *sens = getSensorData(sensindex);
+      sensgegs->finished = 0;
+      auto *info = sens->getinfo();
+      sendsiScan(sens);
+      info->lastscantime = now;
+      if (!info->pollcount)
+        info->starttime = now; // Not needed
+      void resensordata(int sensorindex);
+      resensordata(sensindex);
+      return {sensindex, sens};
+    }
+    const pathconcat sensordir(inbasedir, name);
+    SensorGlucoseData::mkdatabaseAir(sensordir, scan, now);
+    const int ind = addsensor(name);
+    sensor *sen = getsensor(ind);
+    sen->initialized = true;
+    sen->halfdays = maxdaysAir * 2;
+    return {ind, getSensorData(ind)};
+  }
+
 public:
 #ifdef SIBIONICS
   std::pair<int, SensorGlucoseData *> makeSIsensorindex(std::string_view gegsSI,
                                                         uint32_t now) {
 
 #ifndef NOLOG
-    LOGGER("makeSIsensorindex(%s) len=%d\n", gegsSI.data(), gegsSI.size());
+    // Length only: a CareSens Air code carries the pairing PIN.
+    LOGGER("makeSIsensorindex() len=%zu\n", gegsSI.size());
 #endif
     bool hasnum = std::ranges::contains_subrange(gegsSI, sibionicsRecognition);
     const auto *endcode = gegsSI.end();
@@ -770,6 +880,8 @@ public:
     if (!hasnum) {
       std::string_view si = "(SI)";
       if (gegsSI.size() < 36 || !std::ranges::contains_subrange(gegsSI, si)) {
+        if (const auto *air = asCareSensAirScan(gegsSI))
+          return makeAirSensorindex(*air, now);
         if (dexcomEnd(endcode)) {
           if (const auto res = makeDexComSensorindex(endcode - 4, gegsSI, now);
               res.first >= 0)

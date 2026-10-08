@@ -5,9 +5,12 @@ import tk.glucodata.Applic
 import tk.glucodata.SensorIdentity
 import tk.glucodata.SensorBluetooth
 import tk.glucodata.drivers.ManagedSensorIdentityAdapter
+import tk.glucodata.drivers.ManagedSensorUiFamily
 import tk.glucodata.SuperGattCallback
 
 object AiDexManagedSensorIdentityAdapter : ManagedSensorIdentityAdapter {
+    override val uiFamily = ManagedSensorUiFamily.AIDEX
+
     private const val PREFIX = "X-"
     private const val PREFS_NAME = "tk.glucodata_preferences"
     private const val PREF_KEY = "aidex_sensors"

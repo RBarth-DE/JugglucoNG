@@ -2802,7 +2802,12 @@ class AnytimeBleManager(
         val cachedName = SerialNumber?.let { AnytimeRegistry.loadDeviceName(Applic.app, it) }.orEmpty()
         val activeName = gatt.device?.name.orEmpty()
         val connectedName = mygetDeviceName().orEmpty()
-        val resolvedName = AnytimeConstants.resolveHandshakeName(cachedName, connectedName, activeName, SerialNumber)
+        val resolvedName = AnytimeConstants.resolveHandshakeName(
+            cachedName = cachedName,
+            connectedName = connectedName,
+            activeName = activeName,
+            serial = SerialNumber,
+        )
         val nameFamily = AnytimeProfileResolver.familyEntry(resolvedName)
         familyEntry = nameFamily
         if (nameFamily.family != AnytimeConstants.Family.UNKNOWN) {
@@ -2816,6 +2821,11 @@ class AnytimeBleManager(
         }
         profile = AnytimeProfileResolver.resolve(
             if (nameFamily.family != AnytimeConstants.Family.UNKNOWN) resolvedName else familyEntry.prefix,
+        )
+        Log.i(
+            TAG,
+            "Handshake family=${familyEntry.family} name=$resolvedName " +
+                    "(cached=$cachedName connected=$connectedName active=$activeName)",
         )
 
         if (isCt5()) {

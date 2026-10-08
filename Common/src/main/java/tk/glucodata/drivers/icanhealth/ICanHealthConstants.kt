@@ -583,6 +583,31 @@ object ICanHealthConstants {
         return isLikelyPersistedSensorName(trimmed)
     }
 
+    // ---- Onboarding candidate verification ----
+
+    /** Generic Access and Generic Attribute: every BLE peripheral has them, so they say nothing. */
+    private val GENERIC_GATT_SERVICES: Set<UUID> = setOf(
+        UUID.fromString("00001800-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("00001801-0000-1000-8000-00805f9b34fb"),
+    )
+
+    /**
+     * Consecutive connections that must show [isConclusivelyNotCgm] before onboarding drops an
+     * address it found by name. One is not enough: a stale or partial discovery on a real sensor
+     * looks the same once, and a rejected address stays hidden until the onboarding SN changes.
+     */
+    const val NON_CGM_CANDIDATE_REJECT_STRIKES = 2
+
+    /**
+     * True when a discovered GATT table is populated beyond the generic services and still has no
+     * CGM service, i.e. the peripheral answered and it is not a CGM. Name matching stays broad on
+     * purpose (rebrands and unknown naming schemes); this is what lets onboarding move past a
+     * non-CGM it picked by name instead of reconnecting to it forever.
+     */
+    @JvmStatic
+    fun isConclusivelyNotCgm(serviceUuids: Collection<UUID>): Boolean =
+        CGM_SERVICE !in serviceUuids && serviceUuids.any { it !in GENERIC_GATT_SERVICES }
+
     @JvmStatic
     fun isLikelyPersistedSensorName(name: String?): Boolean {
         if (name == null) return false

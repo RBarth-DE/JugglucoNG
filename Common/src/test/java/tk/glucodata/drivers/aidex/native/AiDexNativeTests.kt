@@ -9,6 +9,7 @@ package tk.glucodata.drivers.aidex.native
 
 import org.junit.Assert.*
 import org.junit.Test
+import tk.glucodata.drivers.aidex.AiDexSerialIdentity
 import tk.glucodata.drivers.aidex.native.crypto.AesCfb128
 import tk.glucodata.drivers.aidex.native.crypto.Crc16CcittFalse
 import tk.glucodata.drivers.aidex.native.crypto.Crc8Maxim
@@ -22,7 +23,9 @@ import tk.glucodata.drivers.aidex.native.protocol.AiDexDpCatalogProvider
 import tk.glucodata.drivers.aidex.native.protocol.AiDexDefaultParamProvisioning
 import tk.glucodata.drivers.aidex.native.protocol.AiDexKeyExchange
 import tk.glucodata.drivers.aidex.native.protocol.AiDexOpcodes
+import tk.glucodata.drivers.aidex.native.protocol.AiDexOfficialDpCatalogSnapshot
 import tk.glucodata.drivers.aidex.native.protocol.AiDexParser
+import tk.glucodata.drivers.aidex.native.protocol.AiDexWearProfile
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -244,6 +247,28 @@ class SerialCryptoTests {
     fun testFGenerationSerialDerivesCapturedChallenge() {
         val secret = SerialCrypto.deriveSecret(SerialCrypto.stripPrefix("AiDEX F-22222FZXKT"))
         assertEquals("F0740DC2FA51F24A884F61FC4C14885B", AiDexParser.compactHex(secret))
+    }
+
+    @Test
+    fun testSmartSerialUsesBareSerialChallengeAndIvForNewAndStoredSensors() {
+        val name = "Smart-22222BZTJ3"
+        val canonical = requireNotNull(AiDexSerialIdentity.canonicalFromAdvertisement(name))
+        val recovered = requireNotNull(AiDexSerialIdentity.advertisedProtocolSerialForMacFallback(
+            storedSensorId = "X-6CA0423B65E2",
+            address = "6C:A0:42:3B:65:E2",
+            advertisedName = name,
+        ))
+        // Reference derivation from the reported box SN, not a captured GX-01S handshake.
+        val expectedChallenge = SerialCrypto.deriveSecret("22222BZTJ3")
+        val expectedIv = SerialCrypto.deriveIv("22222BZTJ3")
+        val macChallenge = AiDexKeyExchange("X-6CA0423B65E2").getChallenge()
+        for (serial in listOf(name, canonical, recovered)) {
+            val exchange = AiDexKeyExchange(serial)
+            assertEquals("22222BZTJ3", exchange.bareSerial)
+            assertArrayEquals(expectedChallenge, exchange.getChallenge())
+            assertArrayEquals(expectedIv, exchange.snIv)
+            assertFalse(macChallenge.contentEquals(exchange.getChallenge()))
+        }
     }
 
     @Test
@@ -798,11 +823,13 @@ class AdvertisementTests {
     fun testIsAiDexDevice_ValidNames() {
         assertTrue(AiDexOpcodes.isAiDexDevice("AiDEX X-2222267V4E"))
         assertTrue(AiDexOpcodes.isAiDexDevice("AiDEX X-22222689WH"))
+        assertTrue(AiDexOpcodes.isAiDexDevice("Smart-22222BZTJ3"))
     }
 
     @Test
     fun testIsAiDexDevice_InvalidNames() {
         assertFalse(AiDexOpcodes.isAiDexDevice("Dexcom G7"))
+        assertFalse(AiDexOpcodes.isAiDexDevice("Smartwatch-22222BZTJ3"))
         assertFalse(AiDexOpcodes.isAiDexDevice(null))
         assertFalse(AiDexOpcodes.isAiDexDevice(""))
     }
@@ -1202,6 +1229,39 @@ class DefaultParamCatalogCompareTests {
         assertEquals("1034_GXXXS_14", AiDexDefaultParamProvisioning.normalizeCatalogModelName("GXXXS14"))
         assertEquals("1034_GXXXS_16", AiDexDefaultParamProvisioning.normalizeCatalogModelName("1034GXXXS16"))
         assertNull(AiDexDefaultParamProvisioning.normalizeCatalogModelName("mystery"))
+    }
+
+    @Test
+    fun catalogWearDaysMatchTheModelRating() {
+        assertEquals(15, AiDexWearProfile.ratedDays("GX-01S"))
+        assertEquals(10, AiDexWearProfile.ratedDays("GX-02S"))
+        assertEquals(10, AiDexWearProfile.ratedDays("gx-02s"))
+        assertEquals(8, AiDexWearProfile.ratedDays("GX-03S"))
+        assertEquals(14, AiDexWearProfile.ratedDays("GXXXS14"))
+        assertEquals(16, AiDexWearProfile.ratedDays("GXXXS16"))
+        assertEquals(7, AiDexWearProfile.ratedDays("GXXXS7"))
+        assertNull(AiDexWearProfile.ratedDays("mystery"))
+
+        AiDexOfficialDpCatalogSnapshot.entries.forEach { entry ->
+            assertEquals(
+                "${entry.settingType}@${entry.version}",
+                AiDexWearProfile.catalogWearDays(entry.settingContent),
+                AiDexWearProfile.ratedDays(entry.settingType),
+            )
+        }
+    }
+
+    @Test
+    fun resolveUsesTheRatingOnlyWithoutASensorByte() {
+        assertNull(AiDexWearProfile.resolve(null, null))
+        assertEquals(10, AiDexWearProfile.resolve(null, 10))
+        assertEquals(10, AiDexWearProfile.resolve(10, 10))
+        assertEquals(15, AiDexWearProfile.resolve(15, 10))
+        assertEquals(15, AiDexWearProfile.resolve(15, 8))
+        assertEquals(8, AiDexWearProfile.resolve(0, 8))
+        assertEquals(16, AiDexWearProfile.resolve(16, 15))
+        assertEquals(15, AiDexWearProfile.resolve(15, 15))
+        assertEquals(12, AiDexWearProfile.resolve(12, null))
     }
 
     @Test

@@ -31,8 +31,10 @@ import java.security.interfaces.ECPublicKey
 import java.util.UUID
 import kotlin.math.abs
 import tk.glucodata.Applic
+import tk.glucodata.CurrentDisplaySource
 import tk.glucodata.HistoryRepositoryAccess
 import tk.glucodata.HistorySyncAccess
+import tk.glucodata.LiveReadingLanes
 import tk.glucodata.Log
 import tk.glucodata.logd
 import tk.glucodata.logi
@@ -1518,12 +1520,23 @@ class OttaiBleManager(
         mActiveDeviceAddress = address
         awaitingFreshActivationAdvertisement = true
         constatstatusstr = appString(R.string.looking_for_transmitters, "Looking for nearby transmitters...")
-        SensorBluetooth.blueone?.scanStarter(0L)
         handler.removeCallbacks(freshActivationAdvertisementTimeoutRunnable)
         handler.postDelayed(
             freshActivationAdvertisementTimeoutRunnable,
             FRESH_ACTIVATION_ADVERTISEMENT_TIMEOUT_MS,
         )
+        // scanStarter refuses a second start while mScanning or scanstart is set, and it does
+        // not rebuild filters for a callback added after the scan began. The setup panel's own
+        // scanner leaves that flag set (and can be the scanner the platform is actually
+        // delivering to). Skipping here keeps this wait on "Looking for nearby transmitters"
+        // until the timeout, because no advertisement reaches this callback. Stop first so the
+        // start below is the one that hears them.
+        val blue = SensorBluetooth.blueone
+        if (blue != null && SensorBluetooth.scanActiveOrPending()) {
+            Log.i(TAG, "restarting managed scan for activation advertisement")
+            blue.stopScan(false)
+        }
+        SensorBluetooth.blueone?.scanStarter(0L)
         if (activateRequestedFor?.let { matchesManagedSensorId(it) } == true) {
             armNfcActivationWake("setup activation is waiting for its first advertisement")
         }
@@ -3593,15 +3606,28 @@ class OttaiBleManager(
     private fun publishCurrentReading(reading: EmittedReading) {
         val id = SerialNumber ?: return
         if (!reading.displayValue.isFinite() || reading.displayValue <= 0f) return
+        // Ottai's formula glucose is still stock data: adjustGlucose does not include
+        // this app's user calibration. The external float API expects a resolved value.
+        // Resolve before publishing, including when the asynchronous Room write is pending.
+        // rawCurrent is an electrode diagnostic, so there is no raw glucose lane here.
+        val display = CurrentDisplaySource.resolveIncomingReading(
+            reading = LiveReadingLanes.stock(reading.displayValue, Float.NaN),
+            rate = 0f,
+            targetTimeMillis = reading.sampleMs,
+            preferredSensorId = id,
+            sensorGen = SENSOR_GEN,
+            source = "ottai-live",
+            preferIncomingSample = true,
+        ) ?: return
         markLocalReadingAccepted(reading.sampleMs)
         SuperGattCallback.processExternalCurrentReading(
             id,
-            tk.glucodata.LiveReadingLanes.stock(reading.displayValue, Float.NaN),
-            0f,
-            reading.sampleMs,
+            LiveReadingLanes.resolved(display.primaryValue),
+            display.rate,
+            display.timeMillis,
             SENSOR_GEN,
         )
-        Log.i(TAG, "current publish sec=${reading.sampleMs / 1000L} display=%.2f mgdl=%.1f".format(reading.displayValue, reading.mgdl))
+        Log.i(TAG, "current publish sec=${display.timeMillis / 1000L} display=%.2f stockMgdl=%.1f".format(display.primaryValue, reading.mgdl))
     }
 
     private fun resolveSampleTimeMs(

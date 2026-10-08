@@ -74,16 +74,16 @@ class AnytimeCt2ProfileTests {
         // must win or the CT-14 is driven with the CT3/CT2.5 check handshake.
         assertEquals(
             "SN08402178",
-            AnytimeConstants.resolveHandshakeName("CGM Sensor", "CGM Sensor", "SN08402178"),
+            AnytimeConstants.resolveHandshakeName("CGM Sensor", "CGM Sensor", null, "SN08402178"),
         )
         assertEquals(AnytimeConstants.Family.CT2, AnytimeProfileResolver.resolve(
-            AnytimeConstants.resolveHandshakeName("CGM Sensor", "", "SN08402178"),
+            AnytimeConstants.resolveHandshakeName("CGM Sensor", "", null, "SN08402178"),
         ).family)
     }
 
     @Test
     fun aKnownAdvertisedNameBeatsTheSerial() {
-        assertEquals("SN08-device", AnytimeConstants.resolveHandshakeName("", "SN08-device", "SN08402178"))
+        assertEquals("SN08-device", AnytimeConstants.resolveHandshakeName("", "SN08-device", null, "SN08402178"))
     }
 
     @Test
