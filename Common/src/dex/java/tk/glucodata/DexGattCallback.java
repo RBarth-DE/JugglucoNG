@@ -84,6 +84,8 @@ private volatile boolean directConnectUnreachable = false;
 private volatile boolean lastAttemptUsedAutoConnect = false;
 /** True once this attempt has reported STATE_CONNECTED (even if we skip setup). */
 private boolean attemptEverConnected = false;
+/** GATT that reported STATE_CONNECTED for the attempt now in flight; null until then. */
+private BluetoothGatt connectedAttempt;
     private static final String DEX_CONNECT_PREFS = "dex_connect";
     private static final String DIRECT_CONNECT_UNREACHABLE_PREFIX = "direct_unreachable_";
 
@@ -166,7 +168,8 @@ private void docmd0(BluetoothGatt bluetoothGatt) {
    }
     @SuppressLint("MissingPermission")
     @Override // android.bluetooth.BluetoothGattCallback
-    public void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
+    public synchronized void onDescriptorWrite(BluetoothGatt bluetoothGatt, BluetoothGattDescriptor bluetoothGattDescriptor, int status) {
+        if (stop || bluetoothGatt != mBluetoothGatt) return;
         super.onDescriptorWrite(bluetoothGatt, bluetoothGattDescriptor, status);
         BluetoothGattCharacteristic characteristic = bluetoothGattDescriptor.getCharacteristic();
         if (doLog) {
@@ -228,7 +231,7 @@ private void getlock() {
     wakelock.acquire();
     {if(doLog) {Log.i(LOG_ID,"getlock");};};
     }
-private void releaselock() {
+private synchronized void releaselock() {
     var lock=wakelock;
     if(lock!=null) {
         wakelock=null;
@@ -269,10 +272,41 @@ private boolean connected=false;
         return useAutoConnect() ? 0L : DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS;
     }
 
+    @Override
+    protected void onConnectionAttemptTimeout() {
+        setDirectConnectUnreachable(true, "silent direct connect");
+    }
+
+    @Override
+    public synchronized boolean connectDevice(long delayMillis) {
+        if (stop || dataptr == 0L || CloneSensorRegistry.isCloneSensor(SerialNumber)
+                || SensorOwnershipRuntime.blocksLocalConnection(SerialNumber)) return false;
+        if (delayMillis > 0L) {
+            // An executor timer cannot wake a suspended CPU, and its pending latch
+            // would prevent an alarm/scan from requesting an immediate connection.
+            onalarm = setalarm(System.currentTimeMillis() + delayMillis, onalarm, SerialNumber);
+            if (onalarm != null) return true;
+            // Keep recovery queued if the OS refuses the wakeup alarm.
+            return super.connectDevice(0L);
+        }
+        cancelalarm();
+        return super.connectDevice(0L);
+    }
+
+    @Override
+    public synchronized void setPause(boolean pause) {
+        super.setPause(pause);
+        if (pause) {
+            cancelalarm();
+            releaselock();
+        }
+    }
+
     @SuppressLint("MissingPermission")
     @Override
-    public void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
+    public synchronized void onConnectionStateChange(BluetoothGatt bluetoothGatt, int status, int newState) {
         noteFirstGattCallback("onConnectionStateChange", bluetoothGatt);
+        if (bluetoothGatt != mBluetoothGatt) return;
         if (stop) {
             releaselock();
             {if(doLog) {Log.i(LOG_ID, "onConnectionStateChange stop==true");};};
@@ -289,6 +323,7 @@ private boolean connected=false;
 
         }
         if(newState == BluetoothProfile.STATE_CONNECTED) {
+          connectedAttempt = bluetoothGatt;
           attemptEverConnected = true;
           if(!lastAttemptUsedAutoConnect) {
               // Only a direct connect that actually reached the G7 is evidence that
@@ -337,6 +372,7 @@ private boolean connected=false;
               if(!attemptEverConnected && isConnectTimeoutStatus(status)) {
                   setDirectConnectUnreachable(true, "direct connect timed out status=" + status);
               }
+              connectedAttempt = null;
               attemptEverConnected = false;
               if(!stop) {
                   // Status 19 after a live link is the G7 going quiet until its next
@@ -482,7 +518,8 @@ private boolean connected=false;
 
 
     @Override // android.bluetooth.BluetoothGattCallback
-    public void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
+    public synchronized void onServicesDiscovered(BluetoothGatt bluetoothGatt, int status) {
+        if (stop || bluetoothGatt != mBluetoothGatt) return;
         {if(doLog) {Log.i(LOG_ID, "BLE onServicesDiscovered invoked, status: " + status);};};
         if (status == GATT_SUCCESS) {
                 if(!discover(bluetoothGatt)) 
@@ -903,19 +940,27 @@ private    void getdata(byte[] value) {
 
     @Override // android.bluetooth.BluetoothGattCallback
     public void onCharacteristicChanged(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
-        if(doLog)
-            {if(doLog){Log.showbytes("DexGattCallback onCharacteristicChanged UUID: " + bluetoothGattCharacteristic.getUuid().toString(), value);};}
-        if (bluetoothGattCharacteristic.equals(charact[2])) {
-            Natives.dexbackfill(dataptr, value);
-            return;
-        }
+        // Publication resolves the sensor through the roster. Teardown takes
+        // that monitor before this one, so use the same order here; retaining
+        // this monitor also keeps the native pointer alive during processing.
+        synchronized (SensorBluetooth.gattcallbacks) {
+            synchronized (this) {
+                if (stop || gatt != mBluetoothGatt) return;
+                if(doLog)
+                    {if(doLog){Log.showbytes("DexGattCallback onCharacteristicChanged UUID: " + bluetoothGattCharacteristic.getUuid().toString(), value);};}
+                if (bluetoothGattCharacteristic.equals(charact[2])) {
+                    Natives.dexbackfill(dataptr, value);
+                    return;
+                }
 
-        if (bluetoothGattCharacteristic.equals(charact[3])) {
-            getcert(value);
-        } else if (bluetoothGattCharacteristic.equals(charact[1])) {
-            authenticate(value);
-        } else if (bluetoothGattCharacteristic.equals(charact[0])) {
-            getdata(value);
+                if (bluetoothGattCharacteristic.equals(charact[3])) {
+                    getcert(value);
+                } else if (bluetoothGattCharacteristic.equals(charact[1])) {
+                    authenticate(value);
+                } else if (bluetoothGattCharacteristic.equals(charact[0])) {
+                    getdata(value);
+                }
+            }
         }
     }
 
@@ -1001,7 +1046,9 @@ private    void getdata(byte[] value) {
     }
 
     @Override
-    public void bonded() {
+    public synchronized void bonded() {
+        final BluetoothGatt expectedGatt = mBluetoothGatt;
+        if (stop || expectedGatt == null || mActiveBluetoothDevice == null) return;
         final var bondstate = mActiveBluetoothDevice.getBondState();
         switch(bondstate) {
             case BluetoothDevice.BOND_BONDING: {
@@ -1044,9 +1091,12 @@ private    void getdata(byte[] value) {
                 getdatacmd();
                 if(!has_service) {
                     Applic.RunOnUiThread(() -> {
-                        if (!mBluetoothGatt.discoverServices()) {
-                            Log.e(LOG_ID, "bonded(): bluetoothGatt.discoverServices()  failed");
-                            disconnect();
+                        synchronized (DexGattCallback.this) {
+                            if (stop || expectedGatt != mBluetoothGatt) return;
+                            if (!expectedGatt.discoverServices()) {
+                                Log.e(LOG_ID, "bonded(): bluetoothGatt.discoverServices()  failed");
+                                disconnect();
+                            }
                         }
                         });
                     }
@@ -1135,7 +1185,13 @@ private void resetconnect() {
       }
    }
 @Override
-public void close() {
+public synchronized void close() {
+   // Retired GATT callbacks are ignored, so teardown owns releasing this lock.
+   releaselock();
+   connectedAttempt = null;
+   // close() without a DISCONNECTED callback: forget the old live link so the next
+   // attempt's timeout can still fall back to background connect.
+   attemptEverConnected = false;
    resetconnect();
    super.close();
    }

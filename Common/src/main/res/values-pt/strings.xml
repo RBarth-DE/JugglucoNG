@@ -492,6 +492,8 @@
     <string name="dexcom_setup_title">Configuração Dexcom</string>
     <string name="scan_dexcom">Escanear Dexcom</string>
     <string name="dexcom_scan_instruction">Escaneie o datamatrix no seu sensor Dexcom</string>
+    <string name="dexcom_pairing_code_label">Código de emparelhamento de 4 dígitos</string>
+    <string name="dexcom_pairing_code_instruction">Introduza o código de emparelhamento de 4 dígitos impresso no aplicador do sensor.</string>
     <string name="libre_setup_title">Configuração Libre</string>
     <string name="scan_libre_sensor">Escanear Sensor Libre</string>
     <string name="libre_nfc_instruction">Segure o telefone contra o sensor para escanear</string>
@@ -977,6 +979,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="writedown">Write down!</string>
     <string name="wrongformat">"Wrong format "</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identificar como Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Permite que o AAPS ative SMB sempre com este sensor. Ative apenas se confiar nas suas leituras</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Enviar leituras de glicose para o Health Connect para apps de saúde compatíveis</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2870,4 +2874,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_network_summary">Servidores e pesquisa local</string>
     <string name="clone_connections_empty">Ainda sem dispositivos emparelhados.</string>
     <string name="clone_background_desc">Consome mais bateria</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d entrada</item>
+        <item quantity="other">%d entradas</item>
+    </plurals>
 </resources>

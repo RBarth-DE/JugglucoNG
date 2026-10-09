@@ -219,6 +219,8 @@
     <string name="glucodata_subtitle">GlucoDataHandler (GDH)</string>
     <string name="xdrip_compatible_title">xDrip baahinta</string>
     <string name="xdrip_compatible_desc">AAPS waafaqsan</string>
+    <string name="xdrip_report_as_libre2_title">U aqoonsii sida Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Waxay AAPS u oggolaanaysaa SMB always dareemahan. Shid kaliya haddii aad ku kalsoon tahay akhrintiisa</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">U dir akhrinta gulukooska Health Connect si ay u isticmaalaan abka caafimaadka ee la jaanqaadi kara</string>
     <string name="sensorpermission">Oggolaanshaha dareemayaasha</string>
@@ -746,6 +748,8 @@ Marka la cadaadiyo OK waxay dhalin doontaa xidhiidh teleefankan oo waxa ay soo b
     <string name="dexcom_setup_title">Dexcom Dejinta</string>
     <string name="dexcom_scan_instruction">Sawir shaxanka xogta ee dareenkaaga Dexcom</string>
     <string name="scan_dexcom">Iskaan Dexcom</string>
+    <string name="dexcom_pairing_code_label">Koodhka isku-xidhka ee 4 lambar</string>
+    <string name="dexcom_pairing_code_instruction">Geli koodhka isku-xidhka ee 4 lambar ee ku qoran qalabka gelinta dareemaha.</string>
 
     <!-- Accu-Chek Setup Wizard -->
     <string name="accuchek_setup_title">Dejinta Accu-Chek</string>
@@ -3054,4 +3058,9 @@ Marka la cadaadiyo OK waxay dhalin doontaa xidhiidh teleefankan oo waxa ay soo b
     <string name="clone_network_summary">Adeegayaal iyo raadinta gudaha</string>
     <string name="clone_connections_empty">Weli ma jiraan aalado lammaansan.</string>
     <string name="clone_background_desc">Waxay isticmaashaa batari badan</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d qoraal</item>
+        <item quantity="other">%d qoraal</item>
+    </plurals>
 </resources>

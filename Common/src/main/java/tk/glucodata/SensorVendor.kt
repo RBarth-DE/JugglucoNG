@@ -15,6 +15,7 @@ enum class SensorVendor(
     GLUTEC(R.string.sensor_vendor_glutec),
     YUWELL(R.string.sensor_vendor_yuwell),
     OTTAI(R.string.sensor_vendor_ottai),
+    ISENS(R.string.sensor_vendor_isens),
     NIGHTSCOUT(R.string.sensor_type_nightscout),
     UNKNOWN(R.string.unknown),
     ;
@@ -39,6 +40,7 @@ enum class SensorVendor(
             SensorSourceResolver.SENSOR_KIND_SIBIONICS -> SIBIONICS
             SensorSourceResolver.SENSOR_KIND_DEXCOM -> DEXCOM
             SensorSourceResolver.SENSOR_KIND_ACCUCHEK -> ROCHE
+            SensorSourceResolver.SENSOR_KIND_CARESENS_AIR -> ISENS
             SensorSourceResolver.SENSOR_KIND_AIDEX,
             LEGACY_AIDEX_STREAM_KIND -> MICROTECH
             else -> UNKNOWN
@@ -83,6 +85,7 @@ fun sensorBadge(
         SensorVendor.GLUTEC -> SensorBadge("GLUTEC", model)
         SensorVendor.YUWELL -> SensorBadge("ANYTIME", model)
         SensorVendor.OTTAI -> SensorBadge("OTTAI", model)
+        SensorVendor.ISENS -> SensorBadge("CARE", model)
         SensorVendor.NIGHTSCOUT -> SensorBadge("NIGHT", "SCOUT")
         SensorVendor.UNKNOWN -> SensorBadge("", "")
     }
@@ -97,6 +100,7 @@ private fun fallbackModelToken(type: SensorTypeName): String = when (type) {
     SensorTypeName.SIBIONICS_GS3 -> "GS3"
     SensorTypeName.DEXCOM_G7 -> "G7"
     SensorTypeName.ACCUCHEK_SMARTGUIDE -> "CHEK"
+    SensorTypeName.CARESENS_AIR -> "AIR"
     SensorTypeName.MQ -> "MQ"
     else -> ""
 }
@@ -130,6 +134,7 @@ enum class SensorTypeName(
     SIBIONICS_GS3(R.string.sensor_type_sibionics_gs3),
     DEXCOM_G7(R.string.sensor_type_dexcom_g7),
     ACCUCHEK_SMARTGUIDE(R.string.sensor_type_accuchek_smartguide),
+    CARESENS_AIR(R.string.caresens_air_sensor),
     AIDEX_LINX(R.string.sensor_type_aidex_linx),
     ICAN_I3(R.string.sensor_type_ican_i3),
     MQ(R.string.sensor_type_mq),
@@ -170,6 +175,7 @@ enum class SensorTypeName(
                 if (isSibionics2) SIBIONICS_2 else SIBIONICS_GS1
             SensorSourceResolver.SENSOR_KIND_DEXCOM -> DEXCOM_G7
             SensorSourceResolver.SENSOR_KIND_ACCUCHEK -> ACCUCHEK_SMARTGUIDE
+            SensorSourceResolver.SENSOR_KIND_CARESENS_AIR -> CARESENS_AIR
             SensorSourceResolver.SENSOR_KIND_AIDEX,
             LEGACY_AIDEX_STREAM_KIND -> AIDEX_LINX
             else -> UNKNOWN

@@ -667,6 +667,8 @@
     <string name="dexcom_setup_title">Konfiguracja Dexcom</string>
     <string name="scan_dexcom">Skanuj Dexcom</string>
     <string name="dexcom_scan_instruction">Zeskanuj kod datamatrix na sensorze Dexcom</string>
+    <string name="dexcom_pairing_code_label">4-cyfrowy kod parowania</string>
+    <string name="dexcom_pairing_code_instruction">Wpisz 4-cyfrowy kod parowania wydrukowany na aplikatorze sensora.</string>
     <string name="libre_setup_title">Konfiguracja Libre</string>
     <string name="scan_libre_sensor">Skanuj Sensor Libre</string>
     <string name="libre_nfc_instruction">Przytrzymaj telefon przy sensorze, aby zeskanować</string>
@@ -1012,6 +1014,8 @@
     <string name="wipe_data">Wipe sensor data</string>
     <string name="writedown">Zapisz!</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identyfikuj jako Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Pozwala AAPS włączyć SMB zawsze dla tego sensora. Włącz tylko, jeśli ufasz jego odczytom</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Wysyłaj odczyty glukozy do Health Connect dla zgodnych aplikacji zdrowotnych</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2909,4 +2913,11 @@
     <string name="clone_network_summary">Serwery i wyszukiwanie lokalne</string>
     <string name="clone_connections_empty">Brak sparowanych urządzeń.</string>
     <string name="clone_background_desc">Zwiększa zużycie baterii</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d wpis</item>
+        <item quantity="few">%d wpisy</item>
+        <item quantity="many">%d wpisów</item>
+        <item quantity="other">%d wpisu</item>
+    </plurals>
 </resources>

@@ -599,6 +599,8 @@
     <string name="dexcom_setup_title">Dexcom 设置</string>
     <string name="scan_dexcom">扫描 Dexcom</string>
     <string name="dexcom_scan_instruction">扫描 Dexcom 传感器上的 DataMatrix 代码</string>
+    <string name="dexcom_pairing_code_label">4 位配对码</string>
+    <string name="dexcom_pairing_code_instruction">输入传感器助针器上印刷的 4 位配对码。</string>
     <string name="libre_setup_title">Libre 设置</string>
     <string name="scan_libre_sensor">扫描 Libre 传感器</string>
     <string name="libre_nfc_instruction">将手机靠近传感器进行扫描</string>
@@ -993,6 +995,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="wipe_data">Wipe sensor data</string>
     <string name="writedown">Write down!</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">识别为 Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">允许 AAPS 对此传感器启用“始终 SMB”。仅在您信任其读数时开启</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">将血糖读数发送到 Health Connect，供兼容的健康应用使用</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2884,4 +2888,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_network_summary">服务器与本地发现</string>
     <string name="clone_connections_empty">尚无已配对设备。</string>
     <string name="clone_background_desc">会增加耗电量</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d 条记录</item>
+        <item quantity="other">%d 条记录</item>
+    </plurals>
 </resources>

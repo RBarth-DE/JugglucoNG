@@ -592,6 +592,8 @@
     <string name="dexcom_setup_title">Dexcom Installation</string>
     <string name="scan_dexcom">Skanna Dexcom</string>
     <string name="dexcom_scan_instruction">Skanna datamatrix-koden på Dexcom-sensorn</string>
+    <string name="dexcom_pairing_code_label">4-siffrig parkopplingskod</string>
+    <string name="dexcom_pairing_code_instruction">Ange den 4-siffriga parkopplingskoden som står på sensorapplikatorn.</string>
     <string name="libre_setup_title">Libre Installation</string>
     <string name="scan_libre_sensor">Skanna Libre Sensor</string>
     <string name="libre_nfc_instruction">Håll telefonen mot sensorn för att skanna</string>
@@ -977,6 +979,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="wipe_data">Wipe sensor data</string>
     <string name="writedown">Write down!</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identifiera som Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Låter AAPS tillåta SMB alltid med den här sensorn. Aktivera bara om du litar på dess värden</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Skicka glukosvärden till Health Connect för kompatibla hälsoappar</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2869,4 +2873,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_network_summary">Servrar och lokal sökning</string>
     <string name="clone_connections_empty">Inga parkopplade enheter ännu.</string>
     <string name="clone_background_desc">Ökar batteriförbrukningen</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d post</item>
+        <item quantity="other">%d poster</item>
+    </plurals>
 </resources>

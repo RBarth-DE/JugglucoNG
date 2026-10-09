@@ -214,6 +214,8 @@
     <string name="glucodata_subtitle">GlucoDataHandler (GDH)</string>
     <string name="xdrip_compatible_title">xDrip broadcast</string>
     <string name="xdrip_compatible_desc">AAPS compatible</string>
+    <string name="xdrip_report_as_libre2_title">Libre 2 гэж танилцуулах</string>
+    <string name="xdrip_report_as_libre2_desc">AAPS-д энэ мэдрэгчтэй SMB always ашиглахыг зөвшөөрнө. Уншилтад нь итгэж байвал л асаана уу</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Тохирох эрүүл мэндийн аппуудад зориулж глюкозын хэмжилтийг Health Connect руу илгээх</string>
     <string name="sensorpermission">Мэдрэгчийн зөвшөөрөл</string>
@@ -698,6 +700,8 @@ OK дарснаар энэ утсан дээр холболт үүсч, өөр A
     <string name="dexcom_setup_title">Dexcom тохиргоо</string>
     <string name="dexcom_scan_instruction">Dexcom мэдрэгч дээрх дата матрицыг уншуулна уу</string>
     <string name="scan_dexcom">Dexcom уншуулах</string>
+    <string name="dexcom_pairing_code_label">4 оронтой холбох код</string>
+    <string name="dexcom_pairing_code_instruction">Мэдрэгчийн аппликатор дээр хэвлэгдсэн 4 оронтой холбох кодыг оруулна уу.</string>
     <!-- Accu-Chek Setup Wizard -->
     <string name="accuchek_setup_title">Accu-Chek тохиргоо</string>
     <string name="accuchek_scan_instruction">Accu-Chek SmartGuide мэдрэгч дээрх дата матрицыг уншуулна уу</string>
@@ -2970,4 +2974,9 @@ OK дарснаар энэ утсан дээр холболт үүсч, өөр A
     <string name="clone_network_summary">Серверүүд ба дотоод хайлт</string>
     <string name="clone_connections_empty">Хосолсон төхөөрөмж одоогоор алга.</string>
     <string name="clone_background_desc">Батарейн зарцуулалт нэмэгдэнэ</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d бичлэг</item>
+        <item quantity="other">%d бичлэг</item>
+    </plurals>
 </resources>

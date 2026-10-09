@@ -26,6 +26,7 @@ class SensorVendorTests {
         assertEquals(SensorVendor.DEXCOM, SensorVendor.fromNativeKind(SensorSourceResolver.SENSOR_KIND_DEXCOM))
         assertEquals(SensorVendor.ROCHE, SensorVendor.fromNativeKind(SensorSourceResolver.SENSOR_KIND_ACCUCHEK))
         assertEquals(SensorVendor.MICROTECH, SensorVendor.fromNativeKind(SensorSourceResolver.SENSOR_KIND_AIDEX))
+        assertEquals(SensorVendor.ISENS, SensorVendor.fromNativeKind(SensorSourceResolver.SENSOR_KIND_CARESENS_AIR))
     }
 
     @Test
@@ -45,6 +46,7 @@ class SensorVendorTests {
         assertEquals(SensorTypeName.ACCUCHEK_SMARTGUIDE, SensorTypeName.fromNativeKind(SensorSourceResolver.SENSOR_KIND_ACCUCHEK))
         assertEquals(SensorTypeName.AIDEX_LINX, SensorTypeName.fromNativeKind(SensorSourceResolver.SENSOR_KIND_AIDEX))
         assertEquals(SensorTypeName.AIDEX_LINX, SensorTypeName.fromNativeKind(0x100))
+        assertEquals(SensorTypeName.CARESENS_AIR, SensorTypeName.fromNativeKind(SensorSourceResolver.SENSOR_KIND_CARESENS_AIR))
         assertEquals(SensorTypeName.UNKNOWN, SensorTypeName.fromNativeKind(-1))
     }
 

@@ -9,8 +9,11 @@ import tk.glucodata.Log
 import tk.glucodata.SensorBluetooth
 import tk.glucodata.SuperGattCallback
 import tk.glucodata.drivers.ManagedSensorIdentityAdapter
+import tk.glucodata.drivers.ManagedSensorUiFamily
 
 object OttaiManagedSensorIdentityAdapter : ManagedSensorIdentityAdapter {
+    override val uiFamily = ManagedSensorUiFamily.OTTAI
+
 
     private const val TAG = OttaiConstants.TAG
 

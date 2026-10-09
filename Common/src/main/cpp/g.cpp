@@ -489,6 +489,9 @@ static jint sensorKindForUi(const SensorGlucoseData *sens) {
   if (sens->isAccuChek()) {
     return 0x20;
   }
+  if (sens->isAir()) {
+    return careSensAirKind;
+  }
   if (sens->isAiDex()) {
     return 0x30;
   }
@@ -779,6 +782,10 @@ extern "C" JNIEXPORT jlong JNICALL fromjava(getdataptr)(JNIEnv *env, jclass cl,
             LOGGER("getdataptr(%.*s) AccuChek\n", (int)sensor.length(),
                    sensor.data());
             candidate = new accustream(sensorindex, sens);
+          } else if (sens->isAir()) {
+            LOGGER("getdataptr(%.*s) Air\n", (int)sensor.length(),
+                   sensor.data());
+            candidate = new airstream(sensorindex, sens);
           } else if (sens->isAiDex()) {
             LOGGER("getdataptr(%.*s) AiDex\n", (int)sensor.length(),
                    sensor.data());
@@ -1056,17 +1063,20 @@ fromjava(getSensorUiSnapshot)(JNIEnv *env, jclass cl, jstring jsensor) {
     return nullptr;
   }
   const auto *info = sens->getinfo();
-  const jlong values[5]{
+  // [5] is the managed driver family: the kind in [0] is Libre 2 by
+  // elimination for every shell a Kotlin driver writes into.
+  const jlong values[6]{
       static_cast<jlong>(sensorKindForUi(sens)),
       static_cast<jlong>(info ? info->viewMode : 0),
       static_cast<jlong>(sens->getstarttime()) * 1000LL,
       static_cast<jlong>(sens->expectedEndTime()) * 1000LL,
-      static_cast<jlong>(sens->officialendtime()) * 1000LL};
-  jlongArray result = env->NewLongArray(5);
+      static_cast<jlong>(sens->officialendtime()) * 1000LL,
+      static_cast<jlong>(info ? info->managedFamily : 0)};
+  jlongArray result = env->NewLongArray(6);
   if (!result) {
     return nullptr;
   }
-  env->SetLongArrayRegion(result, 0, 5, values);
+  env->SetLongArrayRegion(result, 0, 6, values);
   return result;
 }
 extern "C" JNIEXPORT jstring JNICALL fromjava(getsensortext)(JNIEnv *envin,

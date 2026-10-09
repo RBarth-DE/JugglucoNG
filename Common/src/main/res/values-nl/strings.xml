@@ -684,6 +684,8 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
     <string name="dexcom_setup_title">Dexcom Installatie</string>
     <string name="scan_dexcom">Scan Dexcom</string>
     <string name="dexcom_scan_instruction">Scan de datamatrix op je Dexcom-sensor</string>
+    <string name="dexcom_pairing_code_label">4-cijferige koppelcode</string>
+    <string name="dexcom_pairing_code_instruction">Voer de 4-cijferige koppelcode in die op de sensorapplicator staat.</string>
     <string name="libre_setup_title">Libre Installatie</string>
     <string name="scan_libre_sensor">Scan Libre Sensor</string>
     <string name="libre_nfc_instruction">Houd je telefoon bij de sensor om te scannen</string>
@@ -1020,6 +1022,8 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
     <string name="wifi">Wifi</string>
     <string name="wipe_data">Wipe sensor data</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identificeren als Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Laat AAPS SMB altijd toestaan met deze sensor. Alleen inschakelen als u de metingen vertrouwt</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Glucosemetingen naar Health Connect sturen voor compatibele gezondheidsapps</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2912,4 +2916,9 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
     <string name="clone_network_summary">Servers en lokaal zoeken</string>
     <string name="clone_connections_empty">Nog geen gekoppelde apparaten.</string>
     <string name="clone_background_desc">Verbruikt meer batterij</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
 </resources>

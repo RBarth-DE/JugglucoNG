@@ -125,6 +125,9 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     /** Opt in only for drivers whose silent connect failure is covered by this deadline. */
     protected long connectionAttemptTimeoutMillis() { return 0L; }
 
+    /** Let an opted-in driver adjust its retry policy after a silent connect attempt. */
+    protected void onConnectionAttemptTimeout() { }
+
     protected final void watchConnectionAttempt(BluetoothGatt attempt) {
         synchronized (this) {
             if (mBluetoothGatt != attempt || stop) return;
@@ -139,6 +142,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || CloneSensorRegistry.isCloneSensor(SerialNumber)
                 || SensorOwnershipRuntime.blocksLocalConnection(SerialNumber)) return;
         Log.i(LOG_ID, SerialNumber + " no connection result before deadline; retrying");
+        onConnectionAttemptTimeout();
         closeGattTransport();
         connectDevice(0, true);
     }
@@ -1806,6 +1810,14 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
     }
 
     public void bonded() {
+    }
+
+    /**
+     * ACTION_PAIRING_REQUEST for this callback's device. Return true after answering it
+     * (setPin), so the system pairing dialog is suppressed.
+     */
+    public boolean pairingRequest() {
+        return false;
     }
 
     public String mygetDeviceName() {

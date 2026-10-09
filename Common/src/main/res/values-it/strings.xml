@@ -465,6 +465,8 @@
     <string name="dexcom_setup_title">Configurazione Dexcom</string>
     <string name="scan_dexcom">Scansiona Dexcom</string>
     <string name="dexcom_scan_instruction">Scansiona il datamatrix sul sensore Dexcom</string>
+    <string name="dexcom_pairing_code_label">Codice di associazione a 4 cifre</string>
+    <string name="dexcom_pairing_code_instruction">Inserisci il codice di associazione a 4 cifre stampato sull’applicatore del sensore.</string>
     <string name="libre_setup_title">Configurazione Libre</string>
     <string name="scan_libre_sensor">Scansiona Sensore Libre</string>
     <string name="libre_nfc_instruction">Tieni il telefono contro il sensore per scansionare</string>
@@ -966,6 +968,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="writedown">Write down!</string>
     <string name="wrongformat">"Wrong format "</string>
     <string name="xdrip_compatible_desc">Local broadcast</string>
+    <string name="xdrip_report_as_libre2_title">Identifica come Libre 2</string>
+    <string name="xdrip_report_as_libre2_desc">Consente ad AAPS di abilitare SMB sempre con questo sensore. Attiva solo se ti fidi delle sue letture</string>
     <string name="health_connect_title">Health Connect</string>
     <string name="health_connect_desc">Invia le letture della glicemia a Health Connect per le app di salute compatibili</string>
     <string name="xdrip_compatible_title">xDrip-compatible</string>
@@ -2859,4 +2863,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_network_summary">Server e ricerca locale</string>
     <string name="clone_connections_empty">Nessun dispositivo associato.</string>
     <string name="clone_background_desc">Consuma più batteria</string>
+    <string name="journal_chart_marker_count">×%1$d</string>
+    <plurals name="journal_chart_marker_count_description">
+        <item quantity="one">%d voce</item>
+        <item quantity="other">%d voci</item>
+    </plurals>
 </resources>

@@ -452,6 +452,7 @@ fun ExpressiveSettingsScreen(
             val xdripEnabled by viewModel.xDripBroadcastEnabled.collectAsState()
             val glucodataBroadcastEnabled by viewModel.glucodataBroadcastEnabled.collectAsState()
             val broadcastComputedTrend by viewModel.broadcastComputedTrend.collectAsState()
+            val xdripReportAsLibre2 by viewModel.xdripReportAsLibre2.collectAsState()
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SettingsSwitchItem(
@@ -472,6 +473,19 @@ fun ExpressiveSettingsScreen(
                     position = CardPosition.MIDDLE,
                     onCheckedChange = { viewModel.toggleXDripBroadcast(it) }
                 )
+                // Only the xDrip-style broadcast carries the source name. Stay visible while
+                // enabled, so turning the broadcast off does not strand the claim out of reach.
+                if (xdripEnabled || xdripReportAsLibre2) {
+                    SettingsSwitchItem(
+                        title = stringResource(R.string.xdrip_report_as_libre2_title),
+                        subtitle = stringResource(R.string.xdrip_report_as_libre2_desc),
+                        checked = xdripReportAsLibre2,
+                        icon = Icons.Default.Badge,
+                        iconTint = exchangeColor,
+                        position = CardPosition.MIDDLE,
+                        onCheckedChange = { viewModel.setXdripReportAsLibre2(it) }
+                    )
+                }
                 SettingsSwitchItem(
                     title = stringResource(R.string.aaps_broadcast),
                     subtitle = stringResource(R.string.glucodata_subtitle),
@@ -1826,6 +1840,7 @@ private fun LanguagePickerDialog(onDismiss: () -> Unit) {
         "Chinese" to "zh",
         "German" to "de",
         "French" to "fr",
+        "Hungarian" to "hu",
         "Italian" to "it",
         "Dutch" to "nl",
         "Polish" to "pl",
