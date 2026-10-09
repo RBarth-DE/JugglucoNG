@@ -434,8 +434,11 @@ private boolean connected=false;
                         // direct-connect timer on silence.
                         setDirectConnectUnreachable(true, "reading delivered; sensor goes quiet");
                         Applic.wakemirrors();
-//                        long alreadywaited = tim - constatchange[0];
                         final long alreadywaited = tim - datatime;
+                        // Never dial at 0: connectGatt right after status 19 catches the
+                        // dying link as a phantom CONNECTED+19 within ~1s, then re-dials
+                        // again. The clean cycles in the 2026-10-09 trace waited ~5s.
+                        final long minQuietMs = 5000L;
                         if(lastDataInvalidDuringWarmup) {
                             long stillwait = lastWarmupRetryAt - tim;
                             {if(doLog) {Log.i(LOG_ID, "warmup alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
@@ -444,18 +447,31 @@ private boolean connected=false;
                             scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         }
                         else if(getalarmclock()) {
-                            //long stillwait=justdata?(6700-alreadywaited):0;
+                            // Next G7 advert is ~5 min after the sample, not after we
+                            // received it. sampletime can be minutes behind alreadywaited.
+                            final long sinceSample = sampletime > 0L ? (tim - sampletime) : alreadywaited;
                             final long mmsectimebetween = 5 * 60 * 1000;
-                            long stillwait = mmsectimebetween - alreadywaited - 27500;
-                            {if(doLog) {Log.i(LOG_ID, "justdata=" + justdata + " alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
+                            long stillwait = mmsectimebetween - sinceSample - 27500;
+                            {if(doLog) {Log.i(LOG_ID, "justdata=" + justdata + " sinceSample=" + sinceSample + " stillwait=" + stillwait);};};
+                            if(stillwait < minQuietMs)
+                                stillwait = minQuietMs;
                             scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         } else {
                             long stillwait = 7000 - alreadywaited;
                             {if(doLog) {Log.i(LOG_ID, "alreadywaited=" + alreadywaited + " stillwait=" + stillwait);};};
-                            if(stillwait<0)
-                                stillwait=0;
+                            if(stillwait < minQuietMs)
+                                stillwait = minQuietMs;
                             scheduleDexReconnect(sensorbluetooth, tim, stillwait);
                         }
+                    }
+                    else if (reachedSensor) {
+                        // Brief CONNECTED then status 19 with no data this session: the
+                        // slot is already over. Re-dialling at 0 only reproduces the
+                        // phantom hop. Wait, then dial again. Do not mark direct
+                        // connect unreachable — this is a normal link loss, not a
+                        // dial that never reached the sensor.
+                        {if(doLog) {Log.i(LOG_ID,"drop without data; schedule reconnect");};};
+                        scheduleDexReconnect(sensorbluetooth, tim, 5000L);
                     }
                     else {
                             {if(doLog) {Log.i(LOG_ID,"connect direct");};};
@@ -882,7 +898,14 @@ private    void getdatacmd() {
         write(1, buf);
     }
 private boolean justdata=false;
+// Receive time of the last 0x4E (System.currentTimeMillis). Used as the
+// "don't dial into the dying link" floor. Sample time is separate: a G7 value
+// is often 1–3 minutes old when it arrives, and mixing the two made
+// alreadywaited look huge, stillwait<=0, and scheduleDexReconnect re-dial
+// immediately into the post-19 silence (phantom CONNECTED+status 19 hop).
 private long datatime=0L;
+// Sample timestamp from dexcomProcessData (ms). Only for next-slot math.
+private long sampletime=0L;
 private boolean lastDataInvalidDuringWarmup=false;
 private long lastWarmupRetryAt=0L;
 private boolean isWarmupReading(long readingTimeMsec, long res) {
@@ -918,8 +941,8 @@ private    void getdata(byte[] value) {
                 handleGlucoseResult(res, newtime);
                 Applic.scheduler.schedule(()->{
                   if(connected) askbackfill();}, 10, TimeUnit.MILLISECONDS);
-//                datatime=timmsec;
-                datatime=newtime;
+                datatime=timmsec;
+                sampletime=newtime;
                 if(savename) saveDeviceName();
             };break;
            case 0x59:{

@@ -49,7 +49,7 @@ class SuperGattCallback {
     static final String LOG_ID="test", ALARM_SERVICE="alarm", POWER_SERVICE="power";
     static final int BOND_NONE=10, BOND_BONDED=12;
     boolean stop, removedBond, connected, bonded, justdata, lastDataInvalidDuringWarmup, backfilled, has_service;
-    long dataptr, showtime, foundtime, datatime, lastWarmupRetryAt;
+    long dataptr, showtime, foundtime, datatime, sampletime, lastWarmupRetryAt;
     int phase=-1, triedinvain, payloadCalls; static final int GetData=10, RequestAuth=5;
     static final int GATT_SUCCESS=0;
     BluetoothGattCharacteristic[] charact={new BluetoothGattCharacteristic(),new BluetoothGattCharacteristic(),new BluetoothGattCharacteristic(),new BluetoothGattCharacteristic()};
@@ -81,9 +81,10 @@ class SuperGattCallback {
             publicationEntered.countDown();
             try{if(!publicationContinue.await(2,TimeUnit.SECONDS))throw new AssertionError("publication gate timed out");}
             catch(InterruptedException e){throw new AssertionError(e);}
-            synchronized(SensorBluetooth.gattcallbacks){
-                if(dataptr==0)throw new AssertionError("native pointer freed during reading");
-            }
+            // free() is synchronized on this same callback monitor, so it cannot
+            // run while we hold it. Identity resolution no longer takes
+            // gattcallbacks (mygatts is lock-free), so do not nest that lock here.
+            if(dataptr==0)throw new AssertionError("native pointer freed during reading");
         }
     }
     static CountDownLatch publicationEntered,publicationContinue;
@@ -179,7 +180,9 @@ public class DexGattCallback extends SuperGattCallback {
         });
         Thread teardown=new Thread(()->{
             teardownStarted.countDown();
-            try{synchronized(SensorBluetooth.gattcallbacks){if(remove)cb.free();else cb.setPause(true);}}
+            // Production free()/setPause() run outside the roster lock (see
+            // SensorBluetooth.updateDevicers). Only the callback monitor is taken.
+            try{if(remove)cb.free();else cb.setPause(true);}
             catch(Throwable e){errors.add(e);}finally{finished.countDown();}
         });
         reading.setDaemon(true);teardown.setDaemon(true);
@@ -221,6 +224,9 @@ public class DexGattCallback extends SuperGattCallback {
         check(cb.useAutoConnect(),"missing old disconnect prevented new-attempt fallback");
         cb=fresh();first=cb.mBluetoothGatt;cb.datatime=System.currentTimeMillis();cb.justdata=true;cb.onConnectionStateChange(first,19,0);
         check(cb.useAutoConnect()&&Applic.alarms.scheduled==1&&cb.directCalls==1,"data reconnect did not use wakeup alarm");
+        cb=fresh();first=cb.mBluetoothGatt;cb.onConnectionStateChange(first,0,2);cb.onConnectionStateChange(first,19,0);
+        check(Applic.alarms.scheduled==1&&cb.directCalls==1,"drop without data redialled immediately");
+        check(!cb.useAutoConnect(),"drop without data flipped autoConnect policy");
         cb=fresh();first=cb.mBluetoothGatt;cb.justdata=true;cb.lastDataInvalidDuringWarmup=true;cb.lastWarmupRetryAt=System.currentTimeMillis()+600000;cb.onConnectionStateChange(first,19,0);
         check(Applic.alarms.scheduled==1&&cb.directCalls==1,"warmup used executor timer");
         cb=fresh();cb.close();calls=cb.directCalls;cb.connectDevice(300000);

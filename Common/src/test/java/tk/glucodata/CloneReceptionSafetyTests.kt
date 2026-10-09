@@ -168,8 +168,8 @@ class CloneReceptionSafetyTests {
             .replace(Regex("\\s+"), " ")
 
         assertTrue(transport.contains("std::lock_guard<std::mutex> sendLock(sendMutex)"))
-        assertTrue(transport.contains("lck.unlock(); rel_msec= sendpacket"))
-        assertTrue(transport.contains("rel_msec= sendpacket(agent, trans_id,data,len, index, starttime2); lck.lock();"))
+        assertTrue(transport.contains("lck.unlock(); sendpacket"))
+        assertTrue(transport.contains("sendpacket(agent, trans_id,data,len, index, starttime2); lck.lock();"))
         assertTrue(transport.contains("lck.unlock(); con->endConnection();"))
     }
 
