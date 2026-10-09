@@ -122,6 +122,12 @@ private boolean attemptEverConnected = false;
     public DexGattCallback(String SerialNumber, long dataptr) {
         super(SerialNumber, dataptr, 0x40);
         known=dexKnownSensor(dataptr);
+        // SuperGattCallback's constructor uses getDeviceAddress(..., true), which hides a
+        // stored Dexcom address until scannedAddress is set. Restore it so a restart can
+        // dial the known G7 instead of falling into a scan-only hole.
+        if (mActiveDeviceAddress == null) {
+            mActiveDeviceAddress = Natives.getDeviceAddress(dataptr, false);
+        }
         directConnectUnreachable = loadDirectConnectUnreachable();
 //        ownDeviceName=Natives.dexGetDeviceName(dataptr);
         {if(doLog) {Log.d(LOG_ID, SerialNumber + " DexGattCallback(..) directConnectUnreachable="
@@ -327,12 +333,26 @@ private boolean connected=false;
               // address is stable (F0:72:4C:A4:92:09 in the 2026-10-08 trace), and
               // replacing a dial with a scan misses brief adverts while the phone is
               // locked — 14 minutes dark twice in that trace.
+              final boolean reachedSensor = attemptEverConnected;
               if(!attemptEverConnected && isConnectTimeoutStatus(status)) {
                   setDirectConnectUnreachable(true, "direct connect timed out status=" + status);
               }
               attemptEverConnected = false;
               if(!stop) {
-                  if(!known){
+                  // Status 19 after a live link is the G7 going quiet until its next
+                  // slot — not a pairing failure. unbond() there removes the bond and
+                  // the following autoConnect never completes (2026-10-09 log:
+                  // dex8AES verified, status 19, BOND_NONE, then 4 minutes dark).
+                  if(reachedSensor) {
+                      if(!removedBond && phase==GetData && datatime==0
+                              && triedinvain>(isWearable?1:4)) {
+                          {if(doLog) {Log.i(LOG_ID,"tried too often "+triedinvain);};};
+                          unbond();
+                          triedinvain=-10;
+                      } else if(datatime==0) {
+                          ++triedinvain;
+                      }
+                  } else if(!known){
                       if(phase==GetData&&!removedBond) {
                           unbond();
                           }
@@ -352,7 +372,7 @@ private boolean connected=false;
                           }
                      }
                   else {
-                    if(datatime==0&&connected) {
+                    if(datatime==0&&connected&&!reachedSensor) {
                           if(phase==GetData&&!removedBond&&(tim-Natives.lastglucosetime())>60*60*1000L) {
                                     unbond();
                              }
@@ -635,6 +655,11 @@ private boolean removedBond=false;
                 {if(doLog){Log.showbytes("value ", value);};}
                 boolean verified = equalpart(aes, value, 1);
                 {if(doLog) {Log.i(LOG_ID,  SerialNumber +" "+ mActiveDeviceAddress + " dex8AES =" + aesSu + (verified ? " verified" : " not verified"));};};
+               if(verified) {
+                  // A verified challenge means this is our sensor; stop treating a later
+                  // status-19 drop as "unknown transmitter, scrap the bond".
+                  known=true;
+               }
                if(!verified) {
                   handshake = "dex8AES different";
                   wrotepass[1] = System.currentTimeMillis();
