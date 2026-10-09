@@ -465,7 +465,7 @@ int ICE_data::senddata(juice_agent_t *agent, const char *data,int len) {
         struct timeval tv;
         gettimeofday(&tv, nullptr);
 
-        uint32_t starttime2=tv.tv_sec,rel_msec;
+        uint32_t starttime2=tv.tv_sec;
    //     uint32_t startmsec=tv.tv_usec/100;
         int totalminuslastunits=(len-1)/dataunit;
         int trans_id;
@@ -488,7 +488,7 @@ int ICE_data::senddata(juice_agent_t *agent, const char *data,int len) {
                 }};
         if(totalminuslastunits>0) {
             for(int index=0;index<totalminuslastunits; index++) {
-                rel_msec= sendpacket(agent, trans_id,data,len, index, starttime2);
+                sendpacket(agent, trans_id,data,len, index, starttime2);
                 if(shutdown) {
                     LOGGERICE("%d senddata: shutdown 3\n",side);
                     return -1;
@@ -543,7 +543,7 @@ std::chrono::duration_cast<std::chrono::milliseconds>(waittime).count());
                                         // otherwise TURN traffic can deadlock the two
                                         // threads in opposite lock order.
                                         lck.unlock();
-                                        rel_msec= sendpacket(agent, trans_id,data,len, index, starttime2);
+                                        sendpacket(agent, trans_id,data,len, index, starttime2);
                                         lck.lock();
                                         if(shutdown) {
                                             LOGGERICE("%d senddata: shutdown 3\n",side);
@@ -583,7 +583,7 @@ std::chrono::duration_cast<std::chrono::milliseconds>(waittime).count());
                   //firstround=false;
                  }
               }
-        rel_msec=sendpacket(agent, trans_id,data,len, totalminuslastunits, starttime2);
+        sendpacket(agent, trans_id,data,len, totalminuslastunits, starttime2);
         auto now = std::chrono::system_clock::now();
         auto waittime= std::chrono::microseconds(RTO*timesRTO*100);
         auto endwait= now + waittime;
@@ -612,7 +612,7 @@ std::chrono::duration_cast<std::chrono::milliseconds>(waittime).count());
                         if(!acknowledged[totalminuslastunits]) {
                                 LOGGERICE("trans_id=%d side=%d senddata final packet %d not acknowledged\n",trans_id,side,totalminuslastunits);
                                 lck.unlock();
-                                rel_msec= sendpacket(agent, trans_id,data,len, totalminuslastunits, starttime2);
+                                sendpacket(agent, trans_id,data,len, totalminuslastunits, starttime2);
                                 lck.lock();
                                 if(shutdown) {
                                     LOGGERICE("%d senddata: shutdown 6\n",side);

@@ -1095,6 +1095,32 @@ class initJuice {
          };
      };
 
+#if !defined(JUGGLUCO_DISTRIBUTION) && __has_include("twilio.local.hpp")
+#include "twilio.local.hpp"
+#define JUGGLUCO_HAS_TWILIO_TOKEN 1
+#else
+#define JUGGLUCO_HAS_TWILIO_TOKEN 0
+#endif
+// twilio.local.hpp can define:
+// #define TWILIOACCOUNT  // TWILIO_ACCOUNT_SID
+// #define USERPASSBASE64 // base64 TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN
+extern time_t oldTwilioTimes;
+time_t oldTwilioTimes=
+#if JUGGLUCO_HAS_TWILIO_TOKEN
+0;
+#else
+std::numeric_limits<time_t>::max();
+#endif
+
+static bool turnTextPresent(const char *value) {
+    return value&&value[0];
+    }
+
+static bool hasTurnCredentials(const juice_turn_server_t &server) {
+    return server.username&&server.password;
+    }
+
+#if JUGGLUCO_HAS_TWILIO_TOKEN
 static std::pair<const char *,const char *> getloginpass(char *twiliooutput,const int len) {
      char *endstr=twiliooutput+len;
      char *startsearch=twiliooutput+(len>300?len-300:0);
@@ -1121,34 +1147,11 @@ static std::pair<const char *,const char *> getloginpass(char *twiliooutput,cons
         }
      return {};
     }
-#if !defined(JUGGLUCO_DISTRIBUTION) && __has_include("twilio.local.hpp")
-#include "twilio.local.hpp"
-#define JUGGLUCO_HAS_TWILIO_TOKEN 1
-#else
-#define JUGGLUCO_HAS_TWILIO_TOKEN 0
-#endif
-// twilio.local.hpp can define:
-// #define TWILIOACCOUNT  // TWILIO_ACCOUNT_SID
-// #define USERPASSBASE64 // base64 TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN
-extern time_t oldTwilioTimes;
-time_t oldTwilioTimes=
-#if JUGGLUCO_HAS_TWILIO_TOKEN
-0;
-#else
-std::numeric_limits<time_t>::max();
-#endif
-
-static bool turnTextPresent(const char *value) {
-    return value&&value[0];
-    }
 
 static bool isTwilioTurnServer(const juice_turn_server_t &server) {
     return turnTextPresent(server.host)&&!strcmp(server.host,"global.turn.twilio.com");
     }
-
-static bool hasTurnCredentials(const juice_turn_server_t &server) {
-    return server.username&&server.password;
-    }
+#endif
 
 #if JUGGLUCO_HAS_TWILIO_TOKEN
 static void refreshTwilioTurnCredentials(juice_turn_server_t *servers,int servercount) {
