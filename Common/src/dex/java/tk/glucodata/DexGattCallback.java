@@ -940,26 +940,26 @@ private    void getdata(byte[] value) {
 
     @Override // android.bluetooth.BluetoothGattCallback
     public void onCharacteristicChanged(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic, @NonNull byte[] value) {
-        // Publication resolves the sensor through the roster. Teardown takes
-        // that monitor before this one, so use the same order here; retaining
-        // this monitor also keeps the native pointer alive during processing.
-        synchronized (SensorBluetooth.gattcallbacks) {
-            synchronized (this) {
-                if (stop || gatt != mBluetoothGatt) return;
-                if(doLog)
-                    {if(doLog){Log.showbytes("DexGattCallback onCharacteristicChanged UUID: " + bluetoothGattCharacteristic.getUuid().toString(), value);};}
-                if (bluetoothGattCharacteristic.equals(charact[2])) {
-                    Natives.dexbackfill(dataptr, value);
-                    return;
-                }
+        // Only the callback monitor. Holding gattcallbacks here stalled every
+        // SensorIdentity → mygatts() reader (the UI thread at Activity start)
+        // for the whole authenticate/getdata batch, and inverted against
+        // free()/close() which take this monitor then resolve identity.
+        // Teardown outside this method already runs free() without the roster lock.
+        synchronized (this) {
+            if (stop || gatt != mBluetoothGatt) return;
+            if(doLog)
+                {if(doLog){Log.showbytes("DexGattCallback onCharacteristicChanged UUID: " + bluetoothGattCharacteristic.getUuid().toString(), value);};}
+            if (bluetoothGattCharacteristic.equals(charact[2])) {
+                Natives.dexbackfill(dataptr, value);
+                return;
+            }
 
-                if (bluetoothGattCharacteristic.equals(charact[3])) {
-                    getcert(value);
-                } else if (bluetoothGattCharacteristic.equals(charact[1])) {
-                    authenticate(value);
-                } else if (bluetoothGattCharacteristic.equals(charact[0])) {
-                    getdata(value);
-                }
+            if (bluetoothGattCharacteristic.equals(charact[3])) {
+                getcert(value);
+            } else if (bluetoothGattCharacteristic.equals(charact[1])) {
+                authenticate(value);
+            } else if (bluetoothGattCharacteristic.equals(charact[0])) {
+                getdata(value);
             }
         }
     }

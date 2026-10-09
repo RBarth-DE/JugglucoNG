@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -758,13 +759,14 @@ public class SensorBluetooth {
         scanstart = false;
     }
 
-    // static final ArrayList<SuperGattCallback> gattcallbacks = new ArrayList<>();
-    public static final ArrayList<SuperGattCallback> gattcallbacks = new ArrayList<>();
+    // Copy-on-write: identity resolution and Compose call mygatts() from the main
+    // thread, while Dexcom GATT processing and roster rebuilds mutate the list.
+    // A plain ArrayList made every UI read wait on those writers (APP_SCOUT_HANG
+    // at mygatts during onActivityPostStarted). Readers must never take a lock.
+    public static final CopyOnWriteArrayList<SuperGattCallback> gattcallbacks = new CopyOnWriteArrayList<>();
 
     public static ArrayList<SuperGattCallback> mygatts() {
-        synchronized (gattcallbacks) {
-            return new ArrayList<>(gattcallbacks);
-        }
+        return new ArrayList<>(gattcallbacks);
     }
 
     private static void addSelectionCandidate(List<String> candidates, Set<String> seen, String serial) {

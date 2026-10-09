@@ -791,7 +791,11 @@ class DashboardViewModel(
     }
 
     fun refreshData() {
-        viewModelScope.launch {
+        // Default, not Main.immediate: setCollectionMode/onResume run during
+        // Activity start, and the snapshot work calls SensorIdentity.resolveMainSensor()
+        // (mygatts) plus JNI/prefs. Doing that on the main thread is what
+        // APP_SCOUT_HANG caught in onActivityPostStarted.
+        viewModelScope.launch(Dispatchers.Default) {
             refreshDashboardSettings()
             refreshSensorSnapshot()
             refreshCurrentDisplaySnapshot()

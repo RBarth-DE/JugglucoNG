@@ -87,6 +87,31 @@ class CloneReceptionSafetyTests {
     }
 
     @Test
+    fun rosterReadersNeverWaitOnWriters() {
+        // APP_SCOUT_HANG: main sat in SensorBluetooth.mygatts() during
+        // onActivityPostStarted while Dexcom GATT processing / updateDevicers
+        // held the ArrayList monitor. Readers must not take that monitor.
+        val bluetooth = source("Common/src/main/java/tk/glucodata/SensorBluetooth.java")
+            .replace(Regex("\\s+"), " ")
+        assertTrue(bluetooth.contains("CopyOnWriteArrayList<SuperGattCallback> gattcallbacks"))
+        val mygattsAt = bluetooth.indexOf("public static ArrayList<SuperGattCallback> mygatts()")
+        assertTrue(mygattsAt >= 0)
+        val mygattsBody = bluetooth.substring(mygattsAt, mygattsAt + 180)
+        assertFalse(mygattsBody.contains("synchronized"))
+    }
+
+    @Test
+    fun dexcomProcessingDoesNotHoldTheRosterMonitor() {
+        val dex = source("Common/src/dex/java/tk/glucodata/DexGattCallback.java")
+            .replace(Regex("\\s+"), " ")
+        val start = dex.indexOf("onCharacteristicChanged(@NonNull BluetoothGatt")
+        assertTrue(start >= 0)
+        val body = dex.substring(start, start + 900)
+        assertFalse(body.contains("synchronized (SensorBluetooth.gattcallbacks)"))
+        assertFalse(body.contains("synchronized (gattcallbacks)"))
+    }
+
+    @Test
     fun reconcileAndIobImportCommitUnderTheReceiverGate() {
         val registry = source("Common/src/main/java/tk/glucodata/CloneSensorRegistry.kt")
             .replace(Regex("\\s+"), " ")
