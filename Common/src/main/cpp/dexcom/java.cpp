@@ -535,10 +535,27 @@ fromjava(dex8AES)(JNIEnv *envin, jclass cl, jlong dataptr, jbyteArray jdata,
                          startdat,
                      reinterpret_cast<unsigned char *>(out.data()) + startout);
 }
+extern "C" JNIEXPORT jstring JNICALL fromjava(dexPinDebug)(JNIEnv *envin,
+                                                          jclass cl,
+                                                          jlong dataptr) {
+  if (!dataptr)
+    return envin->NewStringUTF("no-dataptr");
+  const SensorGlucoseData *sens =
+      reinterpret_cast<dexcomstream *>(dataptr)->hist;
+  if (!sens)
+    return envin->NewStringUTF("no-hist");
+  const auto pin = sens->getDexPin();
+  char buf[80];
+  snprintf(buf, sizeof(buf), "pin=%02x%02x%02x%02x(%.4s) dir='%.*s'",
+           pin[0], pin[1], pin[2], pin[3],
+           reinterpret_cast<const char *>(pin.data()),
+           static_cast<int>(sens->sensid().size()), sens->sensid().data());
+  return envin->NewStringUTF(buf);
+}
+
 extern "C" JNIEXPORT void JNICALL fromjava(dexResetKeys)(JNIEnv *envin,
                                                          jclass cl,
-                                                         jlong dataptr) {
-  dexcomstream *sdata = reinterpret_cast<dexcomstream *>(dataptr);
+                                                         jlong dataptr) {  dexcomstream *sdata = reinterpret_cast<dexcomstream *>(dataptr);
   SensorGlucoseData *sens = sdata->hist;
   PCert *certs = sdata->dexcontext.certs;
   LOGAR("dexResetKeys");

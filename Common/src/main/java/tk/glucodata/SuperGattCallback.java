@@ -1249,9 +1249,15 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             ;
         }
         ;
-        // setDeviceAddress(null);
+        // This means "how we identified the sensor is wrong, go and look again".
+        // Forget all three forms of that identification: the address string, the
+        // BluetoothDevice handle, and the native store. Nulling only the string
+        // left resolveActiveDevice() dialling the very device we just rejected —
+        // which is how a G7 kept re-dialling another sensor's MAC and failing
+        // the auth echo forever.
         foundtime = 0L;
-        mActiveDeviceAddress = null;
+        mActiveBluetoothDevice = null;
+        setDeviceAddress(null);
     }
 
     String getinfo() {

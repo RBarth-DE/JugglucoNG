@@ -1340,6 +1340,9 @@ public class Natives {
 
         public static native boolean dex8AES(long dataptr, byte[] data, int datstart, byte[] out, int outoutstart);
 
+        /** Hex of the 4-byte pairing PIN and the sensor directory name, for handshake diagnosis. */
+        public static native String dexPinDebug(long dataptr);
+
         public static native void dexResetKeys(long dataptr);
 
         public static native boolean dexcomProcessData(long dataptr, byte[] bluetoothdata, long[] timeres);

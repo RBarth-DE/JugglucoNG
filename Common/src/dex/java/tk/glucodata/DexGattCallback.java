@@ -126,9 +126,17 @@ private BluetoothGatt connectedAttempt;
         known=dexKnownSensor(dataptr);
         // SuperGattCallback's constructor uses getDeviceAddress(..., true), which hides a
         // stored Dexcom address until scannedAddress is set. Restore it so a restart can
-        // dial the known G7 instead of falling into a scan-only hole.
+        // dial the known G7 instead of falling into a scan-only hole — but only once we
+        // have authenticated to it (DexDeviceName set). Before then a stored address is
+        // only whatever G7 happened to advertise first, which may be a different sensor
+        // altogether: dialling it produces a valid cert exchange against the wrong
+        // device and an auth echo that can never match.
         if (mActiveDeviceAddress == null) {
-            mActiveDeviceAddress = Natives.getDeviceAddress(dataptr, false);
+            if (known) {
+                mActiveDeviceAddress = Natives.getDeviceAddress(dataptr, false);
+            } else {
+                Natives.setDeviceAddress(dataptr, null);
+            }
         }
         directConnectUnreachable = loadDirectConnectUnreachable();
 //        ownDeviceName=Natives.dexGetDeviceName(dataptr);
@@ -161,6 +169,7 @@ private BluetoothGatt connectedAttempt;
     private static final int GetData = SendKeyChallengeOut + 1;
 
 private void docmd0(BluetoothGatt bluetoothGatt) {
+     {if(doLog) {Log.i(LOG_ID, SerialNumber + " docmd0 phase=" + phase + " keyset=" + Natives.isAuthenticated(dataptr) + " " + Natives.dexPinDebug(dataptr));};};
      certinbufiter = 0;
      certinbuf=new byte[160];
      phase = Round1;
@@ -614,7 +623,7 @@ private void sendcertthread() {
 
 
     private void requestAuth() {
-        {if(doLog) {Log.i(LOG_ID,"requestAuth()");};};
+        {if(doLog) {Log.i(LOG_ID, SerialNumber + " requestAuth()");};};
         Random.fillbytes(random8);
         var uit = new byte[10];
         System.arraycopy(random8, 0, uit, 1, random8.length);
@@ -633,12 +642,14 @@ private    int certinbufiter = 0;
 private    int certsize = 0x10000;
 
     static private boolean equalpart(byte[] one, byte[] two, int twofrom) {
+        final int len = one.length;
+        // Arrays.equals(...) throws when the range falls outside `two`; a short
+        // notification is not an exception, it is just not a match.
+        if (twofrom < 0 || two.length - twofrom < len)
+            return false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             return Arrays.equals(one, 0, one.length, two, twofrom, twofrom + one.length);
         } else {
-            final int len = one.length;
-            if ((two.length - twofrom) < len)
-                return false;
             for (int i = 0; i < len; i++) {
                 if (one[i] != two[i + twofrom])
                     return false;
@@ -685,7 +696,7 @@ private boolean removedBond=false;
  private void authenticate(byte[] value) {
     final var bondstate = mActiveBluetoothDevice.getBondState();
      if(bondstate!=BOND_BONDED) {
-        {if(doLog) {Log.i(LOG_ID,"authenticate bondstate="+bondstate);};};
+        {if(doLog) {Log.i(LOG_ID, SerialNumber + " authenticate bondstate="+bondstate);};};
            for(var b : bondBytes) {
                if(Arrays.equals(b, value)) {
                    {if(doLog) {Log.i(LOG_ID,"createBond");};};
@@ -706,16 +717,19 @@ private boolean removedBond=false;
                 boolean aesSu = Natives.dex8AES(dataptr, random8, 0, aes, 0);
                 {if(doLog){Log.showbytes("dex8AES ", aes);};}
                 {if(doLog){Log.showbytes("value ", value);};}
-                // The echo and sensor challenge are eight bytes each, after
-                // the opcode. Native AES below reads eight bytes at offset nine.
-                boolean verified = aesSu && value.length >= 17 && equalpart(aes, value, 1);
-                {if(doLog) {Log.i(LOG_ID,  SerialNumber +" "+ mActiveDeviceAddress + " dex8AES =" + aesSu + (verified ? " verified" : " not verified"));};};
-               if(verified) {
-                  // A verified challenge means this is our sensor; stop treating a later
+                // Identity is the echo of our random8 at value[1..8]: that is what
+                // proves this is our sensor. The sensor challenge at value[9..16] is
+                // a separate question — a short packet cannot answer it, but it must
+                // not make us scrap a sensor whose echo did match.
+                final boolean echoMatch = aesSu && equalpart(aes, value, 1);
+                final boolean hasChallenge = value.length >= 17;
+                {if(doLog) {Log.i(LOG_ID,  SerialNumber +" "+ mActiveDeviceAddress + " dex8AES =" + aesSu + " echo=" + echoMatch + " len=" + value.length + " keyset=" + Natives.isAuthenticated(dataptr) + " bonded=" + (mActiveBluetoothDevice.getBondState()==BOND_BONDED) + " phase=" + phase);};};
+               if(echoMatch) {
+                  // A matching echo means this is our sensor; stop treating a later
                   // status-19 drop as "unknown transmitter, scrap the bond".
                   known=true;
                }
-               if(!verified) {
+               if(!echoMatch) {
                   handshake = "dex8AES different";
                   wrotepass[1] = System.currentTimeMillis();
                   if(!known&&(!isWearable||removedBond)){
@@ -731,7 +745,15 @@ private boolean removedBond=false;
                        }
                   resetCerts();
                   return;
-                  }  
+                  }
+                if(!hasChallenge) {
+                    // Sensor challenge lives at value[9..16]. Answering it from a
+                    // short packet would read past the array; leave phase at
+                    // RequestAuth and wait rather than sending a reply the sensor
+                    // will reject.
+                    {if(doLog) {Log.i(LOG_ID, SerialNumber + " challenge truncated len=" + value.length);};};
+                    return;
+                }
                 ++phase; //          state = ChallengeReply;
                 byte[] dataaes = new byte[9];
                 Natives.dex8AES(dataptr, value, 9, dataaes, 1);
@@ -849,14 +871,15 @@ private    void getdatacmd() {
     void getcert(byte[] value) {
         System.arraycopy(value, 0, certinbuf, certinbufiter, value.length);
         certinbufiter += value.length;
-        {if(doLog) {Log.i(LOG_ID,"getcert +"+value.length+"="+certinbufiter);};};
+        {if(doLog) {Log.i(LOG_ID, SerialNumber + " getcert +"+value.length+"="+certinbufiter);};};
         switch (phase) {
             case Round1:
             case Round2:
             case Round3: {
                 if (certinbufiter == 160) {
                     int fromround1=phase-Round1;
-                    Natives.dexPutPubKey(dataptr, fromround1, certinbuf);
+                    boolean putOk = Natives.dexPutPubKey(dataptr, fromround1, certinbuf);
+                    {if(doLog) {Log.i(LOG_ID, SerialNumber + " dexPutPubKey round=" + fromround1 + " ok=" + putOk + " keyset=" + Natives.isAuthenticated(dataptr));};};
                     if (phase < Round3)
                         sendpacket(fromround1);
                     else {
@@ -1150,13 +1173,14 @@ private    void getdata(byte[] value) {
 
 
     void cmd(BluetoothGatt gatt, int num) {
-        {if(doLog) {Log.i(LOG_ID, "cmd(" + num + ")");};};
+        {if(doLog) {Log.i(LOG_ID, SerialNumber + " cmd(" + num + ")");};};
         charact[1].setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
         writer(gatt, 1, new byte[]{(byte) 0xA, (byte) num});
     }
 
  private boolean sendpacket(int num) {
         if ((packet = Natives.makeRound12bytes(dataptr, num)) == null) {
+            {if(doLog) {Log.i(LOG_ID, SerialNumber + " makeRound12bytes(" + num + ") failed");};};
             resetCerts();
             return false;
         }

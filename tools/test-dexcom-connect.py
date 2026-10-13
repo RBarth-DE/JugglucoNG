@@ -138,6 +138,7 @@ class Natives {
     static long getSensorStartmsec(long ptr){return 0;}
     static void dexEndBackfill(long ptr){}
     static String getDeviceAddress(long p,boolean fresh){return fresh?null:stored;}
+    static void setDeviceAddress(long p,String a){stored=a;}
     static long lastglucosetime(){return lastGlucose<0?System.currentTimeMillis():lastGlucose;}
     static boolean isAuthenticated(long p){return true;}static void dexbackfill(long p,byte[] v){}
     static boolean dex8AES(long p,byte[] input,int from,byte[] output,int to){
@@ -331,10 +332,19 @@ public class DexGattCallback extends SuperGattCallback {
         cb.onCharacteristicChanged(cb.mBluetoothGatt,cb.charact[1],new byte[17]);
         check(!cb.known&&Natives.resets==1&&cb.disconnects==1,"failed native AES established identity");
         Arrays.fill(response,1,9,(byte)0x53);
-        for(int length:new int[]{0,8,9,16}) {
+        for(int length:new int[]{0,8}) {
             cb=fresh();cb.known=false;cb.phase=RequestAuth;
             cb.onCharacteristicChanged(cb.mBluetoothGatt,cb.charact[1],Arrays.copyOf(response,length));
-            check(!cb.known&&Natives.resets==1&&cb.disconnects==1,"truncated challenge established identity");
+            check(!cb.known&&Natives.resets==1&&cb.disconnects==1,"truncated echo established identity");
+        }
+        // A short packet that still carries our echo is our sensor: keep identity,
+        // but do not advance to ChallengeReply or answer a challenge we do not have.
+        for(int length:new int[]{9,16}) {
+            cb=fresh();cb.known=false;cb.phase=RequestAuth;
+            cb.onCharacteristicChanged(cb.mBluetoothGatt,cb.charact[1],Arrays.copyOf(response,length));
+            check(cb.known,"matching echo did not establish identity at len="+length);
+            check(cb.phase==RequestAuth&&Natives.resets==0&&cb.disconnects==0,
+                  "truncated challenge advanced the handshake at len="+length);
         }
     }
     static void quietReconnectsRespectReceptionAndSampleTime() {

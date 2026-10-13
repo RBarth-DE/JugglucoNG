@@ -810,7 +810,18 @@ int main() {
 #ifndef TEST
 #include "SensorGlucoseData.hpp"
 #include "DexContext.hpp"
-DexContext::DexContext(SensorGlucoseData *sens): pin(hasCrypto()?BN_bin2bn(sens->getDexPin().data(),4,nullptr):nullptr) { }
+DexContext::DexContext(SensorGlucoseData *sens): pin(hasCrypto()?BN_bin2bn(sens->getDexPin().data(),4,nullptr):nullptr) {
+  // The shared key is derived from this PIN, so a wrong one yields a key the
+  // sensor rejects at the echo check. Surface what we actually used.
+  const auto pinbytes = sens->getDexPin();
+  LOGGER("DexContext pin=%02x %02x %02x %02x ('%c%c%c%c') dir='%.*s'\n",
+         pinbytes[0], pinbytes[1], pinbytes[2], pinbytes[3],
+         (pinbytes[0] >= 32 && pinbytes[0] < 127) ? pinbytes[0] : '?',
+         (pinbytes[1] >= 32 && pinbytes[1] < 127) ? pinbytes[1] : '?',
+         (pinbytes[2] >= 32 && pinbytes[2] < 127) ? pinbytes[2] : '?',
+         (pinbytes[3] >= 32 && pinbytes[3] < 127) ? pinbytes[3] : '?',
+         static_cast<int>(sens->sensid().size()), sens->sensid().data());
+}
 DexContext::~DexContext() { BN_free(const_cast<BIGNUM*>(pin)); }
 #endif
 #endif
