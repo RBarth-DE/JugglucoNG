@@ -706,7 +706,9 @@ private boolean removedBond=false;
                 boolean aesSu = Natives.dex8AES(dataptr, random8, 0, aes, 0);
                 {if(doLog){Log.showbytes("dex8AES ", aes);};}
                 {if(doLog){Log.showbytes("value ", value);};}
-                boolean verified = equalpart(aes, value, 1);
+                // The echo and sensor challenge are eight bytes each, after
+                // the opcode. Native AES below reads eight bytes at offset nine.
+                boolean verified = aesSu && value.length >= 17 && equalpart(aes, value, 1);
                 {if(doLog) {Log.i(LOG_ID,  SerialNumber +" "+ mActiveDeviceAddress + " dex8AES =" + aesSu + (verified ? " verified" : " not verified"));};};
                if(verified) {
                   // A verified challenge means this is our sensor; stop treating a later
@@ -1211,6 +1213,7 @@ private void resetconnect() {
 public synchronized void close() {
    // Retired GATT callbacks are ignored, so teardown owns releasing this lock.
    releaselock();
+   connected = false;
    connectedAttempt = null;
    // close() without a DISCONNECTED callback: forget the old live link so the next
    // attempt's timeout can still fall back to background connect.

@@ -392,7 +392,20 @@ object OttaiRegistry {
         val recoveredStartMs = loadMaterials(context, canonical).activeTimeMs
             .takeIf { it > 0L }
             ?: loadProvisionalActiveTime(context, canonical)
-        writeRecords(context, persistedRecords(context).filter { !it.matchesId(canonical) })
+        val (removed, remaining) = persistedRecords(context).partition { it.matchesId(canonical) }
+        // The native mirror shell stays in Natives.activeSensors() under its short name (the last
+        // 7 of the 12 hex). With the record gone nothing claims that name, so SensorBluetooth
+        // rebuilt it as a generic Libre callback: a paused card titled with a cut-off id that
+        // needed a second Disconnect (2026-10-10, 8871A25). Finish it while the record still
+        // exists; a re-added sensor revives it on its first native write.
+        // WearSync2 removes the record before SensorBluetooth.sensorEnded() frees callbacks.
+        // Stop and drain them here while aliases still resolve to their owner; otherwise an
+        // in-flight native write can revive the shell after it has been finished.
+        SensorBluetooth.mygatts().filterIsInstance<OttaiBleManager>()
+            .filter { callback -> removed.any { callback.matchesManagedSensorId(it.sensorId) } }
+            .forEach { it.stopForRemoval() }
+        removed.forEach { finishNativeShell(it.sensorId) }
+        writeRecords(context, remaining)
         writeRecords(
             context,
             draftRecords(context).filter { !it.matchesId(canonical) },
@@ -410,6 +423,7 @@ object OttaiRegistry {
                 // default, which reads as EXPIRED partway through a working sensor.
                 OttaiConstants.PREF_PREHEAT_PERIOD_PREFIX,
                 OttaiConstants.PREF_DEVICE_VERSION_PREFIX, OttaiConstants.PREF_LAST_DATA_NO_PREFIX,
+                OttaiConstants.PREF_LAST_PUBLISHED_GLUCOSE_PREFIX,
                 OttaiConstants.PREF_DEVICE_ID_PREFIX, OttaiConstants.PREF_ACTIVATION_ATTEMPTED_PREFIX,
                 OttaiConstants.PREF_CONTINUITY_BASELINE_PREFIX,
                 OttaiConstants.PREF_HISTORY_HOLES_PREFIX,
@@ -420,6 +434,12 @@ object OttaiRegistry {
             remove(lastValidatedVersionKey(canonical))
         }.apply()
         saveProvisionalActiveTime(context, canonical, recoveredStartMs)
+    }
+
+    private fun finishNativeShell(sensorId: String) {
+        runCatching { Natives.finishSensorById(sensorId) }
+            .onSuccess { finished -> if (finished) Log.i(TAG, "finished native shell of $sensorId") }
+            .onFailure { Log.stack(TAG, "finishNativeShell($sensorId)", it) }
     }
 
     // ---- per-sensor materials ----
@@ -594,6 +614,25 @@ object OttaiRegistry {
         prefs(c).getInt(OttaiConstants.PREF_LAST_DATA_NO_PREFIX + OttaiConstants.canonicalSensorId(id), -1)
     @JvmStatic fun saveLastDataNo(c: Context, id: String, dataNo: Int) {
         prefs(c).edit().putInt(OttaiConstants.PREF_LAST_DATA_NO_PREFIX + OttaiConstants.canonicalSensorId(id), dataNo).apply()
+    }
+
+    @JvmStatic fun loadLastPublishedGlucoseAtMs(c: Context, id: String): Long =
+        prefs(c).getLong(
+            OttaiConstants.PREF_LAST_PUBLISHED_GLUCOSE_PREFIX + OttaiConstants.canonicalSensorId(id),
+            0L,
+        )
+
+    /**
+     * apply(), not commit(): this runs on the GATT callback, and a manager recreated in the same
+     * process reads the in-memory value as soon as apply returns.
+     */
+    @JvmStatic fun saveLastPublishedGlucoseAtMs(c: Context, id: String, sampleMs: Long) {
+        prefs(c).edit()
+            .putLong(
+                OttaiConstants.PREF_LAST_PUBLISHED_GLUCOSE_PREFIX + OttaiConstants.canonicalSensorId(id),
+                sampleMs,
+            )
+            .apply()
     }
 
     /**
@@ -901,8 +940,7 @@ object OttaiRegistry {
         if (canonical.isBlank() ||
             bleAddress == null ||
             loadLastValidatedDeviceVersion(context, canonical).isNullOrBlank() ||
-            loadSessionProfile(context) != SessionProfile.CN_PHONE ||
-            loadAccessToken(context).isBlank()
+            !OttaiCloudClient.activeAuthSessionAvailable(context)
         ) {
             return null
         }

@@ -47,6 +47,7 @@ import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import androidx.annotation.RequiresApi;
@@ -818,10 +819,8 @@ public class SensorBluetooth {
         } catch (Throwable t) {
             Log.e(LOG_ID, "resolvePreferredCurrentSensor activeSensors failed: " + t.getMessage());
         }
-        synchronized (gattcallbacks) {
-            for (SuperGattCallback cb : gattcallbacks) {
-                addSelectionCandidate(candidates, seen, cb.SerialNumber);
-            }
+        for (SuperGattCallback cb : mygatts()) {
+            addSelectionCandidate(candidates, seen, cb.SerialNumber);
         }
         return SensorIdentity.resolveAvailableMainSensor(
                 Natives.lastsensorname(),
@@ -1369,6 +1368,10 @@ public class SensorBluetooth {
             if (active != null && active.length > 0) {
                 blueone.setDevices(active);
             }
+            // With no native sensors setDevices() is skipped, and with it the managed
+            // callbacks removeDevices() just freed; a Nightscout follower would stay gone.
+            tk.glucodata.drivers.nightscout.NightscoutFollowerRegistry.INSTANCE
+                    .ensureFollowerRunning(Applic.app);
             return true;
         } catch (Throwable t) {
             Log.stack(LOG_ID, "syncNativeDevicesNoBluetooth", t);
@@ -1727,6 +1730,26 @@ public class SensorBluetooth {
             return true;
         }
         return false;
+    }
+
+    private static final long GHOST_RECONCILE_MIN_INTERVAL_MS = 60_000L;
+    private static long lastGhostReconcileMs = 0L;
+
+    /**
+     * Rebuilds the callback roster after a sensor was removed from native storage but its
+     * callback is still registered. Rate limited, as it runs on the reading path.
+     *
+     * @return the result of {@link #updateDevices()}; callers must not read it as "roster changed"
+     */
+    public static boolean reconcileGhostMainSensor() {
+        final long now = System.currentTimeMillis();
+        synchronized (SensorBluetooth.class) {
+            if (now - lastGhostReconcileMs < GHOST_RECONCILE_MIN_INTERVAL_MS) {
+                return false;
+            }
+            lastGhostReconcileMs = now;
+        }
+        return updateDevices();
     }
 
     boolean checkandconnect(SuperGattCallback cb, long delay) {

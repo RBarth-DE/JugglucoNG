@@ -46,6 +46,51 @@ import tk.glucodata.SuperGattCallback
 import tk.glucodata.UiRefreshBus
 import tk.glucodata.drivers.ManagedSensorUiFamily
 
+internal data class OttaiCurrentReadingDecision(
+    val previousDisplayedHighWaterMs: Long,
+    val displayAdvanced: Boolean,
+    val publishCurrent: Boolean,
+)
+
+/** Stateful display/publication transition used by the manager and path-level tests. */
+internal class OttaiCurrentReadingState(initialPublishedHighWaterMs: Long = 0L) {
+    private var displayedHighWaterMs = 0L
+    private var publishedHighWaterMs = initialPublishedHighWaterMs.coerceAtLeast(0L)
+
+    @Synchronized
+    fun restorePublishedHighWater(highWaterMs: Long) {
+        publishedHighWaterMs = highWaterMs.coerceAtLeast(0L)
+    }
+
+    /**
+     * History is deliberately ineligible but does not consume a later live claim: the newest
+     * record often arrives on the history characteristic just before the live read returns the
+     * same record, and gating publication on the displayed high-water silenced it (#540).
+     */
+    @Synchronized
+    fun accept(
+        live: Boolean,
+        receivedAtMs: Long,
+        sampleMs: Long,
+        persist: (Long) -> Unit = {},
+        onDisplayAdvance: () -> Unit = {},
+    ): OttaiCurrentReadingDecision {
+        val previousDisplayed = displayedHighWaterMs
+        val freshLive = live && OttaiBleManager.isFreshLiveSample(receivedAtMs, sampleMs)
+        val publishCurrent = freshLive && sampleMs > publishedHighWaterMs
+        if (publishCurrent) {
+            persist(sampleMs)
+            publishedHighWaterMs = sampleMs
+        }
+        val displayAdvanced = sampleMs >= previousDisplayed && (!live || freshLive)
+        if (displayAdvanced) {
+            onDisplayAdvance()
+            displayedHighWaterMs = sampleMs
+        }
+        return OttaiCurrentReadingDecision(previousDisplayed, displayAdvanced, publishCurrent)
+    }
+}
+
 @SuppressLint("MissingPermission")
 class OttaiBleManager(
     serial: String,
@@ -642,6 +687,9 @@ class OttaiBleManager(
 
     private val handlerThread = HandlerThread("Ottai-$serial").also { it.start() }
     private val handler = Handler(handlerThread.looper)
+    // BLE binder callbacks and the handler both write native storage. Permanent shutdown
+    // drains this lock before the registry can finish the shell and remove its owner record.
+    private val nativeMirrorLock = Any()
     private val nativeGlucoseMirror = OttaiNativeGlucoseMirror(
         writeNative = { timestampSec, glucose, temperatureC, sensorId ->
             Natives.addGlucoseStreamWithTemp(timestampSec, glucose, temperatureC, sensorId)
@@ -718,11 +766,10 @@ class OttaiBleManager(
             OttaiCloudClient.CloudFailure("Timed out while fetching sensor credentials"),
         )
     }
-    /** True while a CN cloud session exists — the only profile that serves /cgmAuth/verify. */
-    private fun cnActiveAuthSessionAvailable(): Boolean {
+    /** True while a cloud session that can sign /cgmAuth/verify exists (CN phone, Syai, global). */
+    private fun activeAuthSessionAvailable(): Boolean {
         val ctx = Applic.app ?: return false
-        return OttaiRegistry.loadSessionProfile(ctx) == OttaiRegistry.SessionProfile.CN_PHONE &&
-            OttaiRegistry.loadAccessToken(ctx).isNotBlank()
+        return OttaiCloudClient.activeAuthSessionAvailable(ctx)
     }
 
     private fun v3CredentialBootstrapActive(): Boolean {
@@ -731,7 +778,7 @@ class OttaiBleManager(
         return ottaiAuthEntryMode(
             hasAuthKeys = authKeys != null,
             bootstrapPending = OttaiRegistry.isV3CredentialBootstrapPending(ctx, id),
-            cnSessionAvailable = cnActiveAuthSessionAvailable(),
+            activeAuthSessionAvailable = activeAuthSessionAvailable(),
             validatedDeviceVersion = OttaiRegistry.loadLastValidatedDeviceVersion(ctx, id),
         ) == OttaiAuthEntryMode.V3_CREDENTIAL_BOOTSTRAP
     }
@@ -916,6 +963,7 @@ class OttaiBleManager(
     @Volatile private var lastGlucoseMmol = Float.NaN
     @Volatile private var lastGlucoseMgdl = 0f
     @Volatile private var lastRawCurrent = Float.NaN
+    private val currentReadingState = OttaiCurrentReadingState()
     @Volatile private var lastAcceptedDataNo = -1
     @Volatile private var lastAcceptedSampleMs = 0L
     @Volatile private var lastAcceptedMmol = Float.NaN
@@ -1101,6 +1149,7 @@ class OttaiBleManager(
         authKeys = materials.authKeys
         activatedMaxActiveMs = OttaiRegistry.loadAcceptedMaxActive(context, id)
         lastDataNo = OttaiRegistry.loadLastDataNo(context, id)
+        currentReadingState.restorePublishedHighWater(OttaiRegistry.loadLastPublishedGlucoseAtMs(context, id))
         learnedRecordSize = OttaiRegistry.loadRecordSize(context, id)
         synchronized(historyHolesLock) {
             historyHoles.clear()
@@ -1135,21 +1184,24 @@ class OttaiBleManager(
      * 2000, and rebase deliberately clears the unusable zero-era stream window.
      */
     private fun repairSecondsUnitNativeStart(id: String) {
-        val correctedStartSec = materials.activeTimeMs / 1_000L
-        if (correctedStartSec < 946_684_800L) return
-        runCatching {
-            val minimumRecords = OttaiConstants.EXTENDED_LIFETIME_DAYS * 24 * 60
-            val sensorPtr = Natives.ensureSensorShellWithCapacity(id, correctedStartSec, minimumRecords)
-                .takeIf { it != 0L }
-                ?: Natives.ensureSensorShell(id, correctedStartSec)
-            if (sensorPtr == 0L) return@runCatching
-            Natives.setSensorManagedFamily(id, ManagedSensorUiFamily.OTTAI.nativeCode)
-            val nativeStartSec = Natives.getSensorStartmsecFromSensorptr(sensorPtr) / 1_000L
-            if (nativeStartSec in 1L until 946_684_800L) {
-                Log.w(TAG, "repairing seconds-unit native start for $id")
-                Natives.rebaseDirectStreamWindow(id, correctedStartSec)
-            }
-        }.onFailure { Log.stack(TAG, "repair seconds-unit native start", it) }
+        synchronized(nativeMirrorLock) {
+            if (stop) return
+            val correctedStartSec = materials.activeTimeMs / 1_000L
+            if (correctedStartSec < 946_684_800L) return
+            runCatching {
+                val minimumRecords = OttaiConstants.EXTENDED_LIFETIME_DAYS * 24 * 60
+                val sensorPtr = Natives.ensureSensorShellWithCapacity(id, correctedStartSec, minimumRecords)
+                    .takeIf { it != 0L }
+                    ?: Natives.ensureSensorShell(id, correctedStartSec)
+                if (sensorPtr == 0L) return@runCatching
+                Natives.setSensorManagedFamily(id, ManagedSensorUiFamily.OTTAI.nativeCode)
+                val nativeStartSec = Natives.getSensorStartmsecFromSensorptr(sensorPtr) / 1_000L
+                if (nativeStartSec in 1L until 946_684_800L) {
+                    Log.w(TAG, "repairing seconds-unit native start for $id")
+                    Natives.rebaseDirectStreamWindow(id, correctedStartSec)
+                }
+            }.onFailure { Log.stack(TAG, "repair seconds-unit native start", it) }
+        }
     }
 
     private val reconnectRunnable = Runnable {
@@ -1405,7 +1457,18 @@ class OttaiBleManager(
         connectDevice(0)
     }
 
+    /** Stop before the registry retires the shell; close() waits for native writes to finish. */
+    internal fun stopForRemoval() {
+        stop = true
+        close()
+    }
+
     override fun close() {
+        if (stop) {
+            // Do not hold this lock while closing GATT: its lifecycle uses the callback monitor.
+            // The stopped flag is checked under the same lock by every native writing path.
+            synchronized(nativeMirrorLock) { }
+        }
         advertisementProbe.stop()
         resetServerActiveAuthState()
         if (stop) {
@@ -2008,7 +2071,7 @@ class OttaiBleManager(
             hasAuthKeys = authKeys != null,
             bootstrapPending = ctx != null && id != null &&
                 OttaiRegistry.isV3CredentialBootstrapPending(ctx, id),
-            cnSessionAvailable = cnActiveAuthSessionAvailable(),
+            activeAuthSessionAvailable = activeAuthSessionAvailable(),
             validatedDeviceVersion = if (ctx != null && id != null) {
                 OttaiRegistry.loadLastValidatedDeviceVersion(ctx, id)
             } else {
@@ -3000,6 +3063,7 @@ class OttaiBleManager(
     }
 
     private fun handleGlucosePayload(cipher: ByteArray, live: Boolean, source: String) {
+        if (stop) return
         if (sessionKeyHex.isBlank()) { Log.w(TAG, "payload before session key"); return }
         if (live && commandStatus >= 4) {
             handleEndedLiveBuffer(cipher, source)
@@ -3182,25 +3246,32 @@ class OttaiBleManager(
             noteContinuityRejection(r.record.dataNo, sampleMs)
             return rejectReading(r, mmol, live, reason)
         }
-        val previousGlucoseAtMs = lastGlucoseAtMs
         val freshLiveSample = live && isFreshLiveSample(receivedAtMs, sampleMs)
-        val newest = sampleMs >= previousGlucoseAtMs
-        if (newest && (!live || freshLiveSample)) {
-            lastGlucoseAtMs = sampleMs
-            lastGlucoseMmol = mmol
-            lastGlucoseMgdl = mgdl
-            lastRawCurrent = r.record.rawCurrent.toFloat()
-        }
+        val currentDecision = currentReadingState.accept(
+            live = live,
+            receivedAtMs = receivedAtMs,
+            sampleMs = sampleMs,
+            persist = { claimedMs ->
+                Applic.app?.let { OttaiRegistry.saveLastPublishedGlucoseAtMs(it, SerialNumber.orEmpty(), claimedMs) }
+            },
+            onDisplayAdvance = {
+                lastGlucoseAtMs = sampleMs
+                lastGlucoseMmol = mmol
+                lastGlucoseMgdl = mgdl
+                lastRawCurrent = r.record.rawCurrent.toFloat()
+            },
+        )
         rememberAcceptedReading(r, mmol, sampleMs)
         if (advancesDataNo) noteSeenDataNo(r.record.dataNo)
         Log.i(TAG, "BG dataNo=${r.record.dataNo} mmol=%.2f mgdl=%.0f raw=%d T=%.1f".format(
             mmol, mgdl, r.record.rawCurrent, r.record.temperatureC))
-        val shouldPersist = !live || (freshLiveSample && sampleMs > previousGlucoseAtMs)
+        val shouldPersist = !live ||
+            (freshLiveSample && sampleMs > currentDecision.previousDisplayedHighWaterMs)
         return EmittedReading(
             sampleMs = sampleMs,
             mgdl = mgdl,
             displayValue = if (Applic.unit == 1) mmol else mgdl,
-            publishCurrent = freshLiveSample && sampleMs > previousGlucoseAtMs,
+            publishCurrent = currentDecision.publishCurrent,
             persist = shouldPersist,
             dataNo = r.record.dataNo,
             temperatureC = r.record.temperatureC.toFloat(),
@@ -3505,43 +3576,49 @@ class OttaiBleManager(
      * reached Nightscout no matter how long it had been running.
      */
     private fun mirrorHistoryIntoNative(id: String, readings: List<EmittedReading>) {
-        if (readings.isEmpty()) return
-        runCatching {
-            ensureNativePresenceShell("history-mirror")
-            val stored = nativeGlucoseMirror.mirrorHistory(
-                id,
-                LongArray(readings.size) { readings[it].sampleMs },
-                FloatArray(readings.size) { readings[it].mgdl },
-                FloatArray(readings.size) { readings[it].temperatureC },
-            )
-            if (stored > 0) {
-                applyActivatedWearToNative(id)
-                Natives.wakebackup()
-                Log.i(TAG, "mirrored $stored/${readings.size} history readings into native")
-            }
-        }.onFailure { Log.stack(TAG, "mirrorHistoryIntoNative", it) }
+        synchronized(nativeMirrorLock) {
+            if (stop) return
+            if (readings.isEmpty()) return
+            runCatching {
+                ensureNativePresenceShell("history-mirror")
+                val stored = nativeGlucoseMirror.mirrorHistory(
+                    id,
+                    LongArray(readings.size) { readings[it].sampleMs },
+                    FloatArray(readings.size) { readings[it].mgdl },
+                    FloatArray(readings.size) { readings[it].temperatureC },
+                )
+                if (stored > 0) {
+                    applyActivatedWearToNative(id)
+                    Natives.wakebackup()
+                    Log.i(TAG, "mirrored $stored/${readings.size} history readings into native")
+                }
+            }.onFailure { Log.stack(TAG, "mirrorHistoryIntoNative", it) }
+        }
     }
 
     private fun mirrorLiveReadingIntoNative(
         id: String,
         reading: EmittedReading,
     ) {
-        runCatching {
-            ensureNativePresenceShell("glucose-mirror")
-            val stored = nativeGlucoseMirror.mirrorLive(
-                id,
-                reading.sampleMs,
-                reading.mgdl,
-                reading.temperatureC,
-            )
-            if (stored) {
-                applyActivatedWearToNative(id)
-                Natives.wakebackup()
-                // The shell is sized and the start is known by the time a live write lands, so
-                // this is the first safe moment to close whatever native is missing.
-                handler.post { reconcileNativeFromRoom(id) }
-            }
-        }.onFailure { Log.stack(TAG, "mirrorLiveReadingIntoNative", it) }
+        synchronized(nativeMirrorLock) {
+            if (stop) return
+            runCatching {
+                ensureNativePresenceShell("glucose-mirror")
+                val stored = nativeGlucoseMirror.mirrorLive(
+                    id,
+                    reading.sampleMs,
+                    reading.mgdl,
+                    reading.temperatureC,
+                )
+                if (stored) {
+                    applyActivatedWearToNative(id)
+                    Natives.wakebackup()
+                    // The shell is sized and the start is known by the time a live write lands, so
+                    // this is the first safe moment to close whatever native is missing.
+                    handler.post { reconcileNativeFromRoom(id) }
+                }
+            }.onFailure { Log.stack(TAG, "mirrorLiveReadingIntoNative", it) }
+        }
     }
 
     // Once per sensor per process. See reconcileNativeFromRoom.
@@ -3563,6 +3640,7 @@ class OttaiBleManager(
      * missing costs some writes and produces no resend.
      */
     private fun reconcileNativeFromRoom(id: String) {
+        if (stop) return
         if (nativeReconciledFor == id) return
         val startMs = nativePresenceStartTimeMs()
         if (startMs <= 0L) return
@@ -3578,14 +3656,21 @@ class OttaiBleManager(
                 it.timestamp > 0L && it.value.isFinite() && it.value > 0f
             }
             if (usable.isEmpty()) return@runCatching
-            ensureNativePresenceShell("room-reconcile")
-            val written = nativeGlucoseMirror.mirrorHistory(
-                id,
-                LongArray(usable.size) { usable[it].timestamp },
-                FloatArray(usable.size) { usable[it].value },
-                FloatArray(usable.size) { 0f },
-            )
-            Log.i(TAG, "reconciled native from Room for $id: wrote $written/${usable.size}")
+            // Query Room outside the write lock; shutdown only needs to drain native writes.
+            synchronized(nativeMirrorLock) {
+                if (stop) {
+                    nativeReconciledFor = null
+                    return@runCatching
+                }
+                ensureNativePresenceShell("room-reconcile")
+                val written = nativeGlucoseMirror.mirrorHistory(
+                    id,
+                    LongArray(usable.size) { usable[it].timestamp },
+                    FloatArray(usable.size) { usable[it].value },
+                    FloatArray(usable.size) { 0f },
+                )
+                Log.i(TAG, "reconciled native from Room for $id: wrote $written/${usable.size}")
+            }
         }.onFailure {
             nativeReconciledFor = null
             Log.stack(TAG, "reconcileNativeFromRoom", it)
@@ -3620,7 +3705,13 @@ class OttaiBleManager(
             preferIncomingSample = true,
         ) ?: return
         markLocalReadingAccepted(reading.sampleMs)
-        SuperGattCallback.processExternalCurrentReading(id, display.primaryValue, display.rate, display.timeMillis, SENSOR_GEN)
+        SuperGattCallback.processExternalCurrentReading(
+            id,
+            LiveReadingLanes.resolved(display.primaryValue),
+            display.rate,
+            display.timeMillis,
+            SENSOR_GEN,
+        )
         Log.i(TAG, "current publish sec=${display.timeMillis / 1000L} display=%.2f stockMgdl=%.1f".format(display.primaryValue, reading.mgdl))
     }
 
@@ -3718,25 +3809,28 @@ class OttaiBleManager(
     @Volatile private var nativeCapacityCheckedFor: String? = null
 
     private fun ensureNativePresenceShell(reason: String) {
-        val id = SerialNumber ?: return
-        val startMs = nativePresenceStartTimeMs()
-        if (id.isBlank() || startMs <= 0L) return
-        runCatching {
-            val startSec = (startMs / 1000L).coerceAtLeast(1L)
-            val minimumRecords = OttaiConstants.EXTENDED_LIFETIME_DAYS * 24 * 60
-            if (Natives.ensureSensorShellWithCapacity(id, startSec, minimumRecords) == 0L) {
-                Natives.ensureSensorShell(id, startSec)
-            }
-            Natives.setSensorManagedFamily(id, ManagedSensorUiFamily.OTTAI.nativeCode)
-            applyActivatedWearToNative(id)
-            if (nativeCapacityCheckedFor != id) {
-                if (!Natives.hasSensorStreamCapacity(id, minimumRecords)) {
-                    Log.e(TAG, "native poll capacity below $minimumRecords for $id ($reason); " +
-                        "live readings past the mapped window will not reach Nightscout")
+        synchronized(nativeMirrorLock) {
+            if (stop) return
+            val id = SerialNumber ?: return
+            val startMs = nativePresenceStartTimeMs()
+            if (id.isBlank() || startMs <= 0L) return
+            runCatching {
+                val startSec = (startMs / 1000L).coerceAtLeast(1L)
+                val minimumRecords = OttaiConstants.EXTENDED_LIFETIME_DAYS * 24 * 60
+                if (Natives.ensureSensorShellWithCapacity(id, startSec, minimumRecords) == 0L) {
+                    Natives.ensureSensorShell(id, startSec)
                 }
-                nativeCapacityCheckedFor = id
-            }
-        }.onFailure { Log.stack(TAG, "ensureNativePresenceShell($reason)", it) }
+                Natives.setSensorManagedFamily(id, ManagedSensorUiFamily.OTTAI.nativeCode)
+                applyActivatedWearToNative(id)
+                if (nativeCapacityCheckedFor != id) {
+                    if (!Natives.hasSensorStreamCapacity(id, minimumRecords)) {
+                        Log.e(TAG, "native poll capacity below $minimumRecords for $id ($reason); " +
+                            "live readings past the mapped window will not reach Nightscout")
+                    }
+                    nativeCapacityCheckedFor = id
+                }
+            }.onFailure { Log.stack(TAG, "ensureNativePresenceShell($reason)", it) }
+        }
     }
 
     /** Real activated lifetime in whole days (rounded), or 0 if unknown. */
@@ -3747,10 +3841,13 @@ class OttaiBleManager(
 
     /** Push the real activated lifetime to the native sensor record (main-graph end). */
     private fun applyActivatedWearToNative(id: String) {
-        val days = activatedLifetimeDays()
-        if (days <= 0 || id.isBlank()) return
-        runCatching { Natives.setSensorWearDays(id, days) }
-            .onFailure { Log.stack(TAG, "setSensorWearDays", it) }
+        synchronized(nativeMirrorLock) {
+            if (stop) return
+            val days = activatedLifetimeDays()
+            if (days <= 0 || id.isBlank()) return
+            runCatching { Natives.setSensorWearDays(id, days) }
+                .onFailure { Log.stack(TAG, "setSensorWearDays", it) }
+        }
     }
 
     /**
