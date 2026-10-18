@@ -250,6 +250,13 @@ private synchronized void releaselock() {
    } 
 private int triedinvain=0;
 
+// Addresses of G7s that failed the auth echo while this sensor had no stored device
+// name. Without this, matchDeviceName() accepts the first DXCM advertiser again on
+// every rescan, so a neighbour's G7 can be picked over and over. Entries expire: the
+// real sensor can also fail the echo once (e.g. while another app still holds it).
+private static final long REJECT_MS = 30 * 60 * 1000L;
+private final java.util.Map<String, Long> rejectedAddresses = new java.util.concurrent.ConcurrentHashMap<>();
+
 private boolean connected=false;
     /**
      * Same lever Anytime measured: after a direct connect has already spent Android's
@@ -733,6 +740,8 @@ private boolean removedBond=false;
                   handshake = "dex8AES different";
                   wrotepass[1] = System.currentTimeMillis();
                   if(!known&&(!isWearable||removedBond)){
+                    if(mActiveDeviceAddress!=null)
+                        rejectedAddresses.put(mActiveDeviceAddress, System.currentTimeMillis());
                     searchforDeviceAddress();
                     }
                   else {
@@ -1050,7 +1059,14 @@ private    void getdata(byte[] value) {
     }
     @Override
     public boolean matchDeviceName(String aname, String address) {
-//      if(triedsensors.contains(address)) return false;
+        final Long rejectedAt = address==null ? null : rejectedAddresses.get(address);
+        if(rejectedAt!=null) {
+            if((System.currentTimeMillis()-rejectedAt)<REJECT_MS) {
+                {if(doLog) {Log.i(LOG_ID, SerialNumber + " skip rejected " + address);};};
+                return false;
+                }
+            rejectedAddresses.remove(address);
+            }
         return Natives.dexCandidate(dataptr,aname,address);
         }
 
