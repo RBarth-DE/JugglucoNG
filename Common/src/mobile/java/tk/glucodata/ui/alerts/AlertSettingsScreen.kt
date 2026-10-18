@@ -46,7 +46,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -167,8 +166,9 @@ fun AlertSettingsScreen(
     // Track expanded states
     var expandedType by remember { mutableStateOf<AlertType?>(null) }
     var showPreemptiveSnooze by remember { mutableStateOf(false) }
-    // Track sound picker state (Generic: Current URI + AlertTypeId + Callback)
-    var soundPickerRequest by remember { mutableStateOf<Triple<String?, Int, (String?) -> Unit>?>(null) }
+    var showSameDirectionSuppression by remember { mutableStateOf(false) }
+    // Preview with the same gain and stream as the alert.
+    var soundPickerRequest by remember { mutableStateOf<AlertSoundPickerRequest?>(null) }
     var sameDirectionSuppressionMinutes by remember {
         mutableStateOf(AlertRepository.loadSameDirectionSuppressionMinutes())
     }
@@ -214,6 +214,7 @@ fun AlertSettingsScreen(
                         configs.values.toList().forEach { config ->
                             val updated = config.copy(
                                 soundEnabled = draft.soundEnabled,
+                                soundVolumePercent = draft.soundVolumePercent,
                                 vibrationEnabled = draft.vibrationEnabled,
                                 flashEnabled = draft.flashEnabled,
                                 deliveryMode = draft.deliveryMode,
@@ -240,6 +241,7 @@ fun AlertSettingsScreen(
                         val updatedCustomAlerts = customAlerts.map { alert ->
                             alert.copy(
                                 sound = draft.soundEnabled,
+                                soundVolumePercent = draft.soundVolumePercent,
                                 vibrate = draft.vibrationEnabled,
                                 flash = draft.flashEnabled,
                                 style = when (draft.deliveryMode) {
@@ -265,7 +267,7 @@ fun AlertSettingsScreen(
                         saveCustomAlerts(updatedCustomAlerts)
                     },
                     onPickSound = { draft, updateDraft ->
-                        soundPickerRequest = Triple(draft.customSoundUri, draft.type.id) { uri ->
+                        soundPickerRequest = draft.soundPickerRequest { uri ->
                             updateDraft(draft.copy(customSoundUri = uri))
                             soundPickerRequest = null
                         }
@@ -314,7 +316,7 @@ fun AlertSettingsScreen(
                         persistConfigIfChanged(updated)
                     },
                     onPickSound = {
-                        soundPickerRequest = Triple(config.customSoundUri, config.type.id) { uri ->
+                        soundPickerRequest = config.soundPickerRequest { uri ->
                             persistConfigIfChanged(config.copy(customSoundUri = uri))
                             soundPickerRequest = null
                         }
@@ -346,7 +348,7 @@ fun AlertSettingsScreen(
                             removeCustomAlert(alert.id)
                         },
                         onPickSound = { config ->
-                            soundPickerRequest = Triple(config.soundUri, if (config.type == CustomAlertType.HIGH) 1 else 0) { uri ->
+                            soundPickerRequest = config.soundPickerRequest { uri ->
                                 val updated = config.copy(soundUri = uri)
                                 upsertCustomAlert(updated)
                                 soundPickerRequest = null
@@ -391,7 +393,7 @@ fun AlertSettingsScreen(
                         persistConfigIfChanged(updated)
                     },
                     onPickSound = {
-                        soundPickerRequest = Triple(config.customSoundUri, config.type.id) { uri ->
+                        soundPickerRequest = config.soundPickerRequest { uri ->
                             persistConfigIfChanged(config.copy(customSoundUri = uri))
                             soundPickerRequest = null
                         }
@@ -423,7 +425,7 @@ fun AlertSettingsScreen(
                             removeCustomAlert(alert.id)
                         },
                         onPickSound = { config ->
-                            soundPickerRequest = Triple(config.soundUri, if (config.type == CustomAlertType.LOW) 0 else 1) { uri ->
+                            soundPickerRequest = config.soundPickerRequest { uri ->
                                 val updated = config.copy(soundUri = uri)
                                 upsertCustomAlert(updated)
                                 soundPickerRequest = null
@@ -465,7 +467,7 @@ fun AlertSettingsScreen(
                         persistConfigIfChanged(updated)
                     },
                     onPickSound = {
-                        soundPickerRequest = Triple(config.customSoundUri, config.type.id) { uri ->
+                        soundPickerRequest = config.soundPickerRequest { uri ->
                             persistConfigIfChanged(config.copy(customSoundUri = uri))
                             soundPickerRequest = null
                         }
@@ -473,28 +475,18 @@ fun AlertSettingsScreen(
                 )
             }
 
-            // The cross-family quiet period (#210) belongs with the trend alerts it
-            // coordinates. Its High coverage is on and has no switch.
+            // The cross-family quiet period (#210) governs the trend group as a whole,
+            // so it is a footnote under the group rather than a fifth card: no
+            // container, no tile, and the same left edge as the section header. Its
+            // High coverage is on and has no switch.
             item(key = "same-direction-quiet-period") {
-                Spacer(Modifier.height(8.dp))
-                SliderSettingsItem(
+                GroupFootnote(
                     title = stringResource(R.string.same_direction_suppression_title),
                     subtitle = stringResource(R.string.same_direction_suppression_summary),
                     icon = Icons.Default.NotificationsPaused,
-                    position = SettingsItemPosition.SINGLE
-                ) {
-                    DurationSlider(
-                        label = "",
-                        value = sameDirectionSuppressionMinutes,
-                        range = 0..AlertDefaults.SAME_DIRECTION_SUPPRESSION_MAX_MINUTES,
-                        stepSize = 1,
-                        onValueChange = { persistSameDirectionSuppressionMinutes(it) },
-                        valueText = { v ->
-                            if (v == 0) stringResource(R.string.off)
-                            else stringResource(R.string.minutes_short_format, v)
-                        }
-                    )
-                }
+                    value = sameDirectionSuppressionText(sameDirectionSuppressionMinutes),
+                    onClick = { showSameDirectionSuppression = true }
+                )
             }
 
             // === OTHER ALERTS SECTION ===
@@ -521,7 +513,7 @@ fun AlertSettingsScreen(
                         persistConfigIfChanged(updated)
                     },
                     onPickSound = {
-                        soundPickerRequest = Triple(config.customSoundUri, config.type.id) { uri ->
+                        soundPickerRequest = config.soundPickerRequest { uri ->
                             persistConfigIfChanged(config.copy(customSoundUri = uri))
                             soundPickerRequest = null
                         }
@@ -563,6 +555,17 @@ fun AlertSettingsScreen(
             PreemptiveSnoozeDialog(onDismiss = { showPreemptiveSnooze = false })
         }
 
+        if (showSameDirectionSuppression) {
+            SameDirectionSuppressionDialog(
+                initialMinutes = sameDirectionSuppressionMinutes,
+                onDismiss = { showSameDirectionSuppression = false },
+                onSave = { minutes ->
+                    persistSameDirectionSuppressionMinutes(minutes)
+                    showSameDirectionSuppression = false
+                }
+            )
+        }
+
         if (alertToEdit != null) {
             CustomAlertDialog(
                 initialConfig = alertToEdit,
@@ -575,11 +578,14 @@ fun AlertSettingsScreen(
 
         // Sound Picker Dialog
         if (soundPickerRequest != null) {
-            val (current, alertTypeId, callback) = soundPickerRequest!!
+            val request = soundPickerRequest!!
             SoundPicker(
-                currentUri = current,
-                alertTypeId = alertTypeId,
-                onSoundSelected = callback,
+                currentUri = request.uri,
+                alertTypeId = request.typeId,
+                soundVolumePercent = request.volumePercent,
+                intensityProfile = request.intensityProfile,
+                audioUsage = request.audioUsage,
+                onSoundSelected = request.onSelect,
                 onDismiss = { soundPickerRequest = null }
             )
         }
@@ -686,7 +692,7 @@ fun CustomAlertCard(
                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleMediumEmphasized,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     
@@ -738,6 +744,7 @@ fun CustomAlertCard(
                         enabled = alert.enabled,
                         threshold = alert.threshold,
                         soundEnabled = alert.sound,
+                        soundVolumePercent = alert.soundVolumePercent,
                         customSoundUri = alert.soundUri,
                         vibrationEnabled = alert.vibrate,
                         flashEnabled = alert.flash,
@@ -785,6 +792,7 @@ fun CustomAlertCard(
                                 enabled = newConfig.enabled,
                                 threshold = newConfig.threshold ?: alert.threshold,
                                 sound = newConfig.soundEnabled,
+                                soundVolumePercent = newConfig.soundVolumePercent,
                                 soundUri = newConfig.customSoundUri,
                                 vibrate = newConfig.vibrationEnabled,
                                 flash = newConfig.flashEnabled,
@@ -818,7 +826,8 @@ fun CustomAlertCard(
                                 sanitizeAlertDurationSeconds(alert.durationSeconds),
                                 alert.overrideDnd,
                                 alert.id,
-                                alert.name
+                                alert.name,
+                                alert.soundVolumePercent
                             )
                         },
                         headerContent = {
@@ -861,44 +870,51 @@ fun CustomAlertCard(
 
 
 /**
- * A settings row that holds a slider instead of a trailing control: same
- * surface, shape and 68dp text inset as [SettingsItem], so it sits in a group
- * of rows without reading as a different kind of thing.
+ * A setting that applies to the whole group above it. Deliberately not a card:
+ * it sits on the screen background in muted text, lined up with the
+ * [SectionHeader] label, so it reads as a note about the group rather than as
+ * another member of it. The value is the button that changes it, and its text
+ * ends on the same right edge as the switches above.
  */
 @Composable
-private fun SliderSettingsItem(
+private fun GroupFootnote(
     title: String,
     subtitle: String,
     icon: ImageVector,
-    position: SettingsItemPosition,
-    slider: @Composable () -> Unit
+    value: String,
+    onClick: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = tk.glucodata.ui.components.cardShape(position),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 4.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.Top
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(
+            onClick = onClick,
+            shapes = ButtonDefaults.shapes(),
+            contentPadding = ButtonDefaults.TextButtonContentPadding
         ) {
-            IconTile(icon = icon, tint = MaterialTheme.colorScheme.secondary)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                slider()
-            }
+            Text(value)
         }
     }
 }
@@ -923,7 +939,7 @@ private fun SectionHeader(
         )
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMediumEmphasized,
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,)
     }
 }
@@ -1000,7 +1016,7 @@ private fun AlertCard(
                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(
                         text = stringResource(config.type.nameResId),
-                        style = MaterialTheme.typography.titleMediumEmphasized,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     val subtitle = buildString {
@@ -1452,7 +1468,6 @@ private fun ThresholdSlider(
             Text(
                 text = label,
                 style = if (prominent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-                fontWeight = if (prominent) FontWeight.Medium else null,
                 color = MaterialTheme.colorScheme.onSurface,
                 // A long (localised) label must wrap, not push the value out
                 // of the row.
@@ -1463,8 +1478,7 @@ private fun ThresholdSlider(
             Text(
                 // Use LOCAL sliderValue for real-time updates
                 formatThreshold(sliderValue, isMmol),
-                style = if (prominent) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyMedium,
-                fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Bold,
+                style = if (prominent) MaterialTheme.typography.headlineSmallEmphasized else MaterialTheme.typography.bodyMediumEmphasized,
                 color = MaterialTheme.colorScheme.primary
             )
         }
@@ -1533,8 +1547,7 @@ internal fun DurationSlider(
             )
             Text(
                 valueText(displayValue),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodyMediumEmphasized,
                 color = MaterialTheme.colorScheme.primary
             )
         }
@@ -1551,6 +1564,56 @@ internal fun DurationSlider(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+@Composable
+private fun sameDirectionSuppressionText(minutes: Int): String =
+    if (minutes == 0) stringResource(R.string.off)
+    else stringResource(R.string.minutes_short_format, minutes)
+
+@Composable
+private fun SameDirectionSuppressionDialog(
+    initialMinutes: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int) -> Unit
+) {
+    var minutes by remember { mutableStateOf(initialMinutes) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.NotificationsPaused, contentDescription = null) },
+        title = { Text(stringResource(R.string.same_direction_suppression_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    stringResource(R.string.same_direction_suppression_summary),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                DurationSlider(
+                    label = stringResource(R.string.duration_label),
+                    value = minutes,
+                    range = 0..AlertDefaults.SAME_DIRECTION_SUPPRESSION_MAX_MINUTES,
+                    stepSize = 1,
+                    onValueChange = { minutes = it },
+                    valueText = { sameDirectionSuppressionText(it) }
+                )
+            }
+        },
+        confirmButton = {
+            FilledTonalButton(
+                onClick = { onSave(minutes) },
+                shapes = ButtonDefaults.shapes(),
+                contentPadding = ButtonDefaults.ContentPadding
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes(), contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -2153,8 +2216,7 @@ internal fun ExpressiveToggleCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
+                    style = if (checked) MaterialTheme.typography.bodyLargeEmphasized else MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 if (subtitle != null) {
@@ -2294,3 +2356,29 @@ internal fun ClickableToggleRow(
         )
     }
 }
+
+internal data class AlertSoundPickerRequest(
+    val uri: String?,
+    val typeId: Int,
+    val volumePercent: Int,
+    val intensityProfile: String,
+    val audioUsage: Int,
+    val onSelect: (String?) -> Unit
+)
+
+internal fun AlertConfig.soundPickerRequest(onSelect: (String?) -> Unit) = AlertSoundPickerRequest(
+    customSoundUri, type.id, soundVolumePercent, hapticProfile.name,
+    Notify.getAlertSoundAudioUsage(
+        !AlertType.isLegacyOnlyId(type.id) &&
+            (overrideDND || deliveryMode != AlertDeliveryMode.NOTIFICATION_ONLY)
+    ), onSelect
+)
+
+internal fun CustomAlertConfig.soundPickerRequest(onSelect: (String?) -> Unit) = AlertSoundPickerRequest(
+    soundUri, if (type == CustomAlertType.HIGH) 1 else 0, soundVolumePercent, hapticProfile,
+    Notify.getAlertSoundAudioUsage(
+        tk.glucodata.AlertDeliveryPolicy.shouldUseAlarmAudioStream(
+            tk.glucodata.AlertDeliveryPolicy.normalize(style), overrideDnd
+        )
+    ), onSelect
+)
