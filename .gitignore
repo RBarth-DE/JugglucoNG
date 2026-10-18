@@ -69,3 +69,4 @@ __pycache__/
 
 # Private algorithm replays and local build artifacts
 /.local/
+/.kotlin/
