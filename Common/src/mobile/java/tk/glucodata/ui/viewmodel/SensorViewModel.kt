@@ -98,6 +98,7 @@ data class SensorInfo(
     val vendorBrand: String = "",  // AiDex: advertised rebrand for the badge (e.g. "LUMI"), blank = family
     val isIcan: Boolean = false,
     val isAnytime: Boolean = false,  // Anytime/Yuwell: vendor reports battery as percent + voltage
+    val isMedtrum: Boolean = false,  // Medtrum EasySense: manual calibration via the patch's 0x40 command
     val vendor: SensorVendor = SensorVendor.UNKNOWN,
     val sensorType: SensorTypeName = SensorTypeName.UNKNOWN,
     // Edit 59: Reset compensation state
@@ -379,6 +380,7 @@ class SensorViewModel : ViewModel() {
         val isMq = snapshot.uiFamily == ManagedSensorUiFamily.MQ
         val isIcan = snapshot.uiFamily == ManagedSensorUiFamily.ICAN
         val isAnytime = snapshot.uiFamily == ManagedSensorUiFamily.ANYTIME
+        val isMedtrum = snapshot.uiFamily == ManagedSensorUiFamily.MEDTRUM
         val isSibionics = snapshot.uiFamily == ManagedSensorUiFamily.SIBIONICS
         val isSibionics2 = isSibionics && snapshot.vendorModel.equals("Sibionics 2", ignoreCase = true)
         val detailsConnectionStatus = if (snapshot.showConnectionStatusInDetails) {
@@ -423,6 +425,7 @@ class SensorViewModel : ViewModel() {
             isMq = isMq,
             isIcan = isIcan,
             isAnytime = isAnytime,
+            isMedtrum = isMedtrum,
             vendor = SensorVendor.fromManagedFamily(snapshot.uiFamily),
             sensorType = SensorTypeName.fromManagedFamily(snapshot.uiFamily, snapshot.vendorModel),
             startMs = snapshot.startTimeMs,

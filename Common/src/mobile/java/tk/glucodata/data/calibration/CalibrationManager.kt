@@ -320,8 +320,10 @@ object CalibrationManager {
             }.onFailure {
                 Log.w(TAG, "Failed to load calibrations for background access", it)
             }.getOrNull() ?: return false
-            _calibrations.value = list
-            calibrationStateLoaded = true
+            synchronized(boundaryLock) {
+                _calibrations.value = relabelBeforeBoundaries(list)
+                calibrationStateLoaded = true
+            }
             invalidateComputationCache("ensureCalibrationStateLoaded")
         }
         return true
@@ -1265,9 +1267,17 @@ object CalibrationManager {
                 migrateCalibrationSensorIdsIfPossible()
                 dao.getAllSync()
             }
-            if (calibrationStateLoaded && _calibrations.value == list) return
-            _calibrations.value = list
-            calibrationStateLoaded = true
+            val changed = synchronized(boundaryLock) {
+                val relabeled = relabelBeforeBoundaries(list)
+                if (calibrationStateLoaded && _calibrations.value == relabeled) {
+                    false
+                } else {
+                    _calibrations.value = relabeled
+                    calibrationStateLoaded = true
+                    true
+                }
+            }
+            if (!changed) return
             invalidateComputationCache("loadCalibrations")
             requestUiRefreshAfterCalibrationChange()
         }
@@ -1486,6 +1496,93 @@ object CalibrationManager {
         refreshDiagnosticsPreview(isRawMode = false, force = true)
         requestMirrorCalibrationSyncForSensors(affectedSensors)
         Log.i(TAG, "Cleared all calibrations")
+    }
+
+    /** A process that has not read the rows yet, as after a background restart. */
+    internal fun resetLoadedStateForTests(keepBoundaries: Boolean = true) {
+        synchronized(boundaryLock) {
+            if (!keepBoundaries) sessionBoundaries.clear()
+            calibrationStateLoaded = false
+            _calibrations.value = emptyList()
+        }
+    }
+
+    /** A replaced sensor's insertion: points of [sensorId] taken before [cutoffMs] are filed as [archiveId]. */
+    private data class SessionBoundary(val archiveId: String, val cutoffMs: Long)
+
+    private val sessionBoundaries = java.util.concurrent.ConcurrentHashMap<String, SessionBoundary>()
+
+    /**
+     * Orders a boundary against the loaders: a snapshot read before the boundary was declared is
+     * relabelled when it is applied, and a boundary declared while the rows are not loaded yet is
+     * not lost, so an older snapshot cannot bring the previous electrode's points back.
+     */
+    private val boundaryLock = Any()
+
+    private fun relabelBeforeBoundaries(rows: List<CalibrationEntity>): List<CalibrationEntity> {
+        if (sessionBoundaries.isEmpty()) return rows
+        return rows.map { row ->
+            val boundary = sessionBoundaries.entries
+                .firstOrNull { sensorMatches(row.sensorId, it.key) && row.timestamp < it.value.cutoffMs }
+                ?.value
+            if (boundary == null) row else row.copy(sensorId = boundary.archiveId)
+        }
+    }
+
+    /**
+     * Makes the session boundary effective in lookups right away, without touching the database:
+     * a driver calls it on its BLE thread before it publishes the replacement's first reading, so
+     * the previous electrode's points cannot correct it while the persisted move is still queued.
+     * Only points taken before [cutoffMs] are affected, so a calibration entered for the replacement
+     * is never swept along.
+     */
+    fun declareSessionBoundary(sensorId: String, archiveId: String, cutoffMs: Long) {
+        val target = normalizeSensorId(sensorId)
+        if (archiveId.isBlank() || target.isBlank() || cutoffMs <= 0L) return
+        val boundary = SessionBoundary(archiveId, cutoffMs)
+        val changed = synchronized(boundaryLock) {
+            if (sessionBoundaries.put(target, boundary) == boundary) return@synchronized false
+            if (!calibrationStateLoaded) return@synchronized false // the loaders apply it when the rows arrive
+            val current = _calibrations.value
+            val relabeled = relabelBeforeBoundaries(current)
+            if (relabeled == current) return@synchronized false
+            _calibrations.value = relabeled
+            true
+        }
+        if (changed) invalidateComputationCache("sessionBoundary")
+    }
+
+    /** Blocking entry point for a driver on its own thread (see [archiveSensorCalibrations]). */
+    fun archiveSensorCalibrationsBlocking(sensorId: String, archiveId: String, cutoffMs: Long): Int =
+        kotlinx.coroutines.runBlocking { archiveSensorCalibrations(sensorId, archiveId, cutoffMs) }
+
+    /**
+     * Re-files the calibrations of [sensorId] taken before [cutoffMs] (the replacement's insertion)
+     * under [archiveId]. Nothing is deleted: the rows keep their values and only stop matching the
+     * live sensor, so the replacement electrode is not corrected by an offset measured on the
+     * previous one. Points at or after the cutoff belong to the replacement and stay. Returns how
+     * many rows moved, or -1 when the engine could not do it yet, so a caller that must not lose
+     * the request can retry.
+     */
+    suspend fun archiveSensorCalibrations(sensorId: String, archiveId: String, cutoffMs: Long = Long.MAX_VALUE): Int {
+        if (!ensureInitialized()) return -1
+        val target = normalizeSensorId(sensorId)
+        if (archiveId.isBlank() || target.isBlank()) return 0
+        val moved = withContext(Dispatchers.IO) {
+            dao.getAllSync()
+                .filter { sensorMatches(it.sensorId, target) && it.timestamp < cutoffMs }
+                .sumOf { dao.updateSensorId(it.id, archiveId) }
+        }
+        // The rows are in the database under the archive id now; the in-memory rule has done its job.
+        sessionBoundaries.remove(target, SessionBoundary(archiveId, cutoffMs))
+        if (moved == 0) return 0
+        deferGlucoseAlertsUntilNextReading()
+        loadCalibrations()
+        refreshDiagnosticsPreview(isRawMode = true, force = true)
+        refreshDiagnosticsPreview(isRawMode = false, force = true)
+        requestMirrorCalibrationSync(target)
+        Log.i(TAG, "Archived $moved calibrations of $target as $archiveId")
+        return moved
     }
 
     suspend fun restoreAll(calibrations: List<CalibrationEntity>) {

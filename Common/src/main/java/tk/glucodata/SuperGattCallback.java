@@ -830,6 +830,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         }
 
         glucosealarms.setagealarm(timmsec, showtime);
+        GlucoseUpdateBroadcaster.armFreshnessDeadline(timmsec);
         final var alertEvaluation = tk.glucodata.alerts.AlertRuntimeManager.INSTANCE.onNewReading(SerialNumber,
                 reading, rate, timmsec, sensorgen);
         final boolean runtimeHandledStandardGlucoseAlert = alertEvaluation.getStandardGlucoseAlertHandled();
@@ -1032,6 +1033,8 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                             + " exchangeOnly=" + DataSmoothing.smoothOnlyExchangeOutputs(app)
                             + " payloadAgeMs=" + (System.currentTimeMillis() - loopFeedPayload.getTimeMillis()));
                 SendLikexDrip.broadcastglucose(loopFeedPayload, sensorstartmsec);
+                XdripBackfill.recordLiveSent(loopFeedPayload.getSensorId(), loopFeedPayload.getTimeMillis(),
+                        loopFeedPayload.getSensorGen(), sensorstartmsec);
             }
             if (!isWearable) {
                 if (exchangeOutputDecision.getSendWearInt())
