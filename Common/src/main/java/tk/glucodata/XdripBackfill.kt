@@ -53,7 +53,9 @@ object XdripBackfill {
                 sensorSerial, rows, viewMode, DataSmoothing.exchangeSmoothingMinutes(app),
             )
             val spacingMs = DataSmoothing.exchangeThrottleIntervalMinutes(app) * 60_000L
-            val picked = tracker.pick(id, candidates, System.currentTimeMillis(), spacingMs)
+            val now = System.currentTimeMillis()
+            val backfillable = tracker.withoutPendingLive(candidates, now)
+            val picked = tracker.pick(id, backfillable, now, spacingMs)
             if (picked.isEmpty()) return
             if (Log.doLog) Log.i(LOG_ID, "backfill ${picked.size} readings sensor=$id")
             for (point in picked) {

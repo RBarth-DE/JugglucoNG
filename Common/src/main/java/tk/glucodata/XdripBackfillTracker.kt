@@ -77,6 +77,15 @@ class XdripBackfillTracker(
         return picked
     }
 
+    /**
+     * The live path sends the newest reading right after it is stored, before it is recorded as
+     * sent. A newest candidate that recent is left to live, or AAPS would receive it twice.
+     */
+    fun withoutPendingLive(batch: List<Candidate>, nowMs: Long): List<Candidate> {
+        val newest = batch.maxByOrNull(Candidate::timeMs) ?: return batch
+        return if (nowMs - newest.timeMs < LIVE_PENDING_MS) batch.filter { it !== newest } else batch
+    }
+
     private fun hasSentWithin(sent: TreeSet<Long>, timeMs: Long, spacingMs: Long): Boolean {
         val before = sent.floor(timeMs)
         if (before != null && timeMs - before < spacingMs) return true
@@ -92,5 +101,6 @@ class XdripBackfillTracker(
     companion object {
         const val DEFAULT_WINDOW_MS = 24L * 60L * 60L * 1000L
         const val MIN_SPACING_MS = 60_000L
+        const val LIVE_PENDING_MS = 2L * 60L * 1000L
     }
 }

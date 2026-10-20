@@ -96,4 +96,27 @@ class XdripBackfillTrackerTests {
 
         assertEquals(emptyList<Candidate>(), picked)
     }
+
+    @Test
+    fun `a fresh newest reading is left to the live path`() {
+        val tracker = XdripBackfillTracker()
+        val batch = listOf(point(1), point(0))
+
+        assertEquals(listOf(batch[0]), tracker.withoutPendingLive(batch, now))
+    }
+
+    @Test
+    fun `a single fresh reading is not backfilled`() {
+        val tracker = XdripBackfillTracker()
+
+        assertEquals(emptyList<Candidate>(), tracker.withoutPendingLive(listOf(point(0)), now))
+    }
+
+    @Test
+    fun `an old batch is kept whole`() {
+        val tracker = XdripBackfillTracker()
+        val batch = listOf(point(30), point(20), point(10))
+
+        assertEquals(batch, tracker.withoutPendingLive(batch, now))
+    }
 }
