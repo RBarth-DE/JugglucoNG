@@ -15,7 +15,9 @@ ext {
     appVersionName = '1.2.5-Alpha'
 
     ndkver       = '29.0.14206865'
-    CMAKEVERSION = '4.4.4'
+    // CI installs this with sdkmanager. A machine with a newer CMake sets cmakeVersion in
+    // ~/.gradle/gradle.properties instead of editing this line.
+    CMAKEVERSION = '4.1.2'
     CPPSTD       = '-std=gnu++26'
     TARGETSDK    = 36
     APPCOMPAT    = '1.8.0'
@@ -111,7 +113,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                version = "$CMAKEVERSION"
+                version = "${project.findProperty('cmakeVersion') ?: CMAKEVERSION}"
                 // Explicit relay-only input; ignored local headers/account tokens stay excluded.
                 if (project.hasProperty('requireProductionSigning')) {
                     if (!project.hasProperty('distributionTurnDirectory') ||
@@ -239,7 +241,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "$CMAKEVERSION"
+            version = "${project.findProperty('cmakeVersion') ?: CMAKEVERSION}"
         }
     }
 
