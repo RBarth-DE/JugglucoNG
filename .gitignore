@@ -70,3 +70,7 @@ __pycache__/
 # Private algorithm replays and local build artifacts
 /.local/
 /.kotlin/
+
+# Local Gradle daemon JVM (Android Studio generates it). Tracked, it forces JDK 25 on CI,
+# which Robolectric cannot instrument.
+/gradle/gradle-daemon-jvm.properties
