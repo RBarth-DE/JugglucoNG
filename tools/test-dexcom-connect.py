@@ -56,6 +56,8 @@ phase_end = source.index(';', source.index('private static final int GetData', p
 fields += source[phase_start:phase_end]
 bond_start = source.index('private static final byte[][] bondBytes')
 fields += source[bond_start:source.index(';', bond_start) + 1]
+rejected_start = source.index('private final java.util.Map<String, Long> rejectedAddresses')
+fields += source[rejected_start:source.index(';', rejected_start) + 1]
 roster_field = re.search(r'public static final \w+<SuperGattCallback> gattcallbacks = new \w+<>\(\);', roster_source).group()
 roster_methods = method('public static ArrayList<SuperGattCallback> mygatts()', roster_source)
 body = r'''
@@ -150,6 +152,7 @@ class Natives {
     static void setDeviceAddress(long p,String a){stored=a;}
     static long lastglucosetime(){return lastGlucose<0?System.currentTimeMillis():lastGlucose;}
     static boolean authenticated=true;
+    static String dexPinDebug(long p){return "";}
     static boolean isAuthenticated(long p){return authenticated;}static void dexbackfill(long p,byte[] v){}
     static boolean dex8AES(long p,byte[] input,int from,byte[] output,int to){
         if(input.length<from+8)throw new AssertionError("JNI AES input would read beyond packet");
