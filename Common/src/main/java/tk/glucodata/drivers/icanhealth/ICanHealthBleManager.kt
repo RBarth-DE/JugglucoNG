@@ -165,6 +165,7 @@ class ICanHealthBleManager(
     @Volatile private var postAuthSetupStarted = false
     @Volatile private var historyBackfillRequested = false
     @Volatile private var historyBackfillAttemptedThisConnection = false
+    @Volatile private var tailRetryAttemptedThisConnection = false
     @Volatile private var shouldRequestAuthenticatedHistoryBackfill = true
     @Volatile private var suppressAutomaticHistoryBackfill = false
     @Volatile private var nativeLifetimeDeclaredFor: String? = null
@@ -798,24 +799,33 @@ class ICanHealthBleManager(
         ) ?: return false
         if (latestCurrentRaw.isFinite() && latestCurrentRaw > 0f && latestTemperatureC.isFinite() && latestTemperatureC > 0f) {
             val recentHistory = recentLiveGlucoseMgdl.toList()
+            // Vendor contract: planCalib(algBg, newBg, bgList, caliK, calik0, calikM) and
+            // startCalib(caliK, caliAdjustBool, caliAdjustNo, newBg, calik0). `newBg` is the
+            // *sensor's* glucose, not the fingerstick; caliK/calik0/calikM are calibration
+            // coefficients, not measurements — their real source is the correctCode table
+            // (server or SN fallback) persisted per sensor, which the driver does not have yet.
+            // The 1f placeholders below are therefore inert, not a calibration.
+            val sensorBg = recentLiveGlucoseMgdl.lastOrNull() ?: glucoseMgDl.toFloat()
             val planned = ICanHealthCeCalibration.planCalib(
-                currentGluMgDl = recentLiveGlucoseMgdl.lastOrNull() ?: glucoseMgDl.toFloat(),
-                fingerGluMgDl = glucoseMgDl.toFloat(),
-                historyMgDl = recentHistory,
-                sensorCurrent = latestCurrentRaw,
-                temperatureC = latestTemperatureC,
+                algBg = sensorBg,
+                newBg = sensorBg,
+                bgList = recentHistory,
+                caliK = 1f,
+                calik0 = 1f,
+                calikM = 1f,
             )
             val started = ICanHealthCeCalibration.startCalib(
-                currentGluMgDl = glucoseMgDl.toFloat(),
-                isFirstCalibration = lastCeCalibrationCount <= 0,
-                existingCalibrationCount = lastCeCalibrationCount,
-                sensorCurrent = latestCurrentRaw,
-                temperatureC = latestTemperatureC,
+                caliK = 1f,
+                caliAdjustBool = lastCeCalibrationCount <= 0,
+                caliAdjustNo = lastCeCalibrationCount,
+                newBg = sensorBg,
+                calik0 = 1f,
             )
             Log.i(
                 TAG,
-                "iCan calibration plan finger=$glucoseMgDl seq=$sequenceNumber current=$latestCurrentRaw temp=$latestTemperatureC " +
-                    "planP=${planned.encodedP} startP=${started.encodedP}"
+                "iCan calibration plan finger=$glucoseMgDl seq=$sequenceNumber sensorBg=$sensorBg " +
+                    "raw=$latestCurrentRaw temp=$latestTemperatureC " +
+                    "planK=${planned.caliK} planBg=${planned.calibBg} startK=${started.caliK} startBg=${started.calibBg}"
             )
         }
         enqueueOp(GattOp.Write(ICanHealthConstants.CGM_SPECIFIC_OPS, packet))
@@ -1294,6 +1304,7 @@ class ICanHealthBleManager(
                 historyBackfillRequested = false
                 historyBackfillPhase = HistoryBackfillPhase.NONE
                 historyBackfillAttemptedThisConnection = false
+                tailRetryAttemptedThisConnection = false
                 awaitingFreshStatusForHistoryBackfill = false
                 awaitingMtuNegotiation = false
                 glucoseHistoryImportedRecordCount = 0
@@ -2302,7 +2313,11 @@ class ICanHealthBleManager(
 
             ICanHealthParser.isSensorInfoResponse(data) -> {
                 handler.removeCallbacks(sensorInfoFallbackRunnable)
-                Log.i(TAG, "Sensor info: ${data.toHexString()}")
+                Log.i(
+                    TAG,
+                    "Sensor info: ${data.toHexString()} " +
+                        "model=$vendorModelName sw=$vendorSoftwareVersion ${bundledKeyContext()}"
+                )
                 startPostAuthSetup("sensor-info")
             }
 
@@ -2366,22 +2381,29 @@ class ICanHealthBleManager(
     }
 
     private fun handleRacpResponse(data: ByteArray) {
+        // Keep the raw bytes and the device identity on every RACP outcome: a
+        // history failure on an unseen firmware is otherwise undebuggable.
+        val racpContext =
+            "racp=${data.toHexString()} phase=${historyBackfillPhase.name} ${bundledKeyContext()}" +
+                " model=$vendorModelName sw=$vendorSoftwareVersion"
         when (ICanHealthParser.parseRacpResultCode(data)) {
             ICanHealthConstants.RACP_RESULT_SUCCESS -> {
-                Log.i(TAG, "RACP transfer complete")
+                Log.i(TAG, "RACP transfer complete ($racpContext)")
                 handleRacpPhaseCompletion(noData = false)
             }
 
             ICanHealthConstants.RACP_RESULT_NO_DATA -> {
-                Log.i(TAG, "RACP reported no data")
+                Log.i(TAG, "RACP reported no data ($racpContext)")
                 handleRacpPhaseCompletion(noData = true)
             }
 
             ICanHealthConstants.RACP_RESULT_NOT_SUPPORTED -> {
+                Log.w(TAG, "RACP not supported ($racpContext)")
                 handleRacpNotSupported()
             }
 
             ICanHealthConstants.RACP_RESULT_FAILED -> {
+                Log.w(TAG, "RACP failed ($racpContext)")
                 handleRacpFailed()
             }
 
@@ -2731,9 +2753,44 @@ class ICanHealthBleManager(
                         "retrying after RACP-failed on modern glucose-history command"
                     )
                 } else {
-                    suppressAutomaticHistoryBackfill = false
-                    shouldRequestAuthenticatedHistoryBackfill = glucoseHistoryImportedRecordCount <= 0
-                    Log.w(TAG, "RACP history request failed; will retry on a later authenticated reconnect")
+                    val requestedSequence = pendingGlucoseHistoryStartSequence
+                    val tailRetryStartSequence = if (tailRetryAttemptedThisConnection) {
+                        null
+                    } else {
+                        ICanHealthHistoryPolicy.tailRetryStartSequence(
+                            readingIntervalMinutes = readingIntervalMinutes(),
+                            currentSequence = currentSequenceNumber,
+                            requestedSequence = requestedSequence,
+                        )
+                    }
+                    if (tailRetryStartSequence != null) {
+                        // Both command families refused the requested range. That is also what a
+                        // sensor without a correct code does, but every refusal on record asks for a
+                        // range days behind the live edge, so try the tail once before concluding
+                        // anything: it either recovers the newest records or shows that the refusal
+                        // is about history as a whole. See docs/ican-cgm-protocol.md, section 6.
+                        tailRetryAttemptedThisConnection = true
+                        useModernGlucoseHistoryCommand = true
+                        pendingGlucoseHistoryStartSequence = tailRetryStartSequence
+                        Log.w(
+                            TAG,
+                            "Glucose-history RACP failed for seq=$requestedSequence on both command " +
+                                "families; retrying from the live edge at seq=$tailRetryStartSequence"
+                        )
+                        if (!beginHistoryBackfillPhase(
+                                HistoryBackfillPhase.GLUCOSE,
+                                "retrying from the live edge after RACP-failed on both command families"
+                            )
+                        ) {
+                            suppressAutomaticHistoryBackfill = false
+                            shouldRequestAuthenticatedHistoryBackfill = glucoseHistoryImportedRecordCount <= 0
+                            Log.w(TAG, "RACP history request failed; will retry on a later authenticated reconnect")
+                        }
+                    } else {
+                        suppressAutomaticHistoryBackfill = false
+                        shouldRequestAuthenticatedHistoryBackfill = glucoseHistoryImportedRecordCount <= 0
+                        Log.w(TAG, "RACP history request failed; will retry on a later authenticated reconnect")
+                    }
                 }
             }
 
@@ -4184,6 +4241,7 @@ class ICanHealthBleManager(
         historyBackfillRequested = false
         historyBackfillPhase = HistoryBackfillPhase.NONE
         historyBackfillAttemptedThisConnection = false
+        tailRetryAttemptedThisConnection = false
         awaitingFreshStatusForHistoryBackfill = false
         glucoseHistoryImportedRecordCount = 0
         pendingHistoryBackfillReason = null
