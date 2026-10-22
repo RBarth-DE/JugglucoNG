@@ -492,7 +492,7 @@ public class DexGattCallback extends SuperGattCallback {
         check(cb.mActiveDeviceAddress.equals(Natives.stored),"process startup lost saved address");
         check(!cb.useAutoConnect()&&cb.connectionAttemptTimeoutMillis()==45000,"initial direct attempt policy");
         cb.onConnectionStateChange(first,147,0);
-        check(cb.useAutoConnect()&&cb.connectionAttemptTimeoutMillis()==0,"timeout did not switch to background");
+        check(cb.useAutoConnect()&&cb.connectionAttemptTimeoutMillis()==420000,"timeout did not switch to background");
         check(cb.rescans==0&&cb.mActiveDeviceAddress.equals(Natives.stored),"timeout discarded identity");
         check(new DexGattCallback("sensor-A",1).useAutoConnect(),"process restart forgot mode");
         check(!new DexGattCallback("sensor-B",2).useAutoConnect(),"mode leaked across sensors");
@@ -503,6 +503,7 @@ public class DexGattCallback extends SuperGattCallback {
         check(cb.payloadCalls==0&&!cb.has_service,"retired payload callback mutated new session");
         cb.onServicesDiscovered(current,0);cb.onCharacteristicChanged(current,cb.charact[0],new byte[]{0x4e});check(cb.payloadCalls==2,"current payload callback rejected");
         cb=fresh();cb.onConnectionAttemptTimeout();check(cb.useAutoConnect(),"silent direct attempt did not fall back");
+        cb=fresh();cb.onConnectionStateChange(cb.mBluetoothGatt,147,0);check(cb.useAutoConnect(),"setup: background mode");cb.onConnectionAttemptTimeout();check(!cb.useAutoConnect(),"stuck background connect did not retry direct");
         cb=fresh();cb.onConnectionStateChange(cb.mBluetoothGatt,133,0);check(cb.useAutoConnect(),"legacy failure did not fall back");
         cb=fresh();first=cb.mBluetoothGatt;cb.onConnectionStateChange(first,0,2);cb.onConnectionStateChange(first,147,0);
         check(!cb.useAutoConnect(),"connected link loss treated as failed direct dial");
@@ -526,7 +527,7 @@ public class DexGattCallback extends SuperGattCallback {
         cb=fresh();cb.dataptr=0;check(!cb.connectDevice(300000),"removed sensor scheduled alarm");
         cb=fresh();CloneSensorRegistry.clone=true;check(!cb.connectDevice(300000),"clone sensor scheduled alarm");
         cb=fresh();SensorOwnershipRuntime.blocked=true;check(!cb.connectDevice(300000),"released sensor scheduled alarm");
-        cb=fresh();defaultAuto=true;check(cb.useAutoConnect()&&cb.connectionAttemptTimeoutMillis()==0,"application background setting ignored");
+        cb=fresh();defaultAuto=true;check(cb.useAutoConnect()&&cb.connectionAttemptTimeoutMillis()==420000,"application background setting ignored");
         cb=fresh();first=cb.mBluetoothGatt;cb.onConnectionStateChange(first,0,2);
         PowerManager.WakeLock firstLock=cb.wakelock;check(firstLock.held,"connection did not acquire wake lock");
         cb.close();check(!firstLock.held&&cb.wakelock==null&&PowerManager.releases==1,"Bluetooth-off close leaked wake lock");

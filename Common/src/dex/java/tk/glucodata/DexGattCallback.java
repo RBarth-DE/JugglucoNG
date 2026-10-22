@@ -68,6 +68,8 @@ private static final long DEXCOM_WARMUP_MSEC = 30L * 60L * 1000L;
 private static final long DEXCOM_WARMUP_RETRY_SLACK_MSEC = 15_000L;
 /** Silent connectGatt() used to wait for LossOfSensorAlarm (~5.5 min). */
 private static final long DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS = 45_000L;
+/** Longest a background connect may stay silent: one G7 slot (~290s seen) plus margin. */
+private static final long DEXCOM_AUTOCONNECT_WATCHDOG_MS = 7L * 60L * 1000L;
 /** BluetoothGatt.GATT_ERROR: the direct-connect 30s timer on pre-API 35 stacks. */
 private static final int GATT_ERROR_STATUS = 133;
 private boolean known=false;
@@ -294,12 +296,21 @@ private boolean connected=false;
         // has Android's 30s timer (status 147); this deadline only unsticks a stack
         // that reports nothing at all. LossOfSensorAlarm remains the outer bound on a
         // background connect that never comes back.
-        return useAutoConnect() ? 0L : DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS;
+        return useAutoConnect() ? DEXCOM_AUTOCONNECT_WATCHDOG_MS : DEXCOM_CONNECT_ATTEMPT_TIMEOUT_MS;
     }
 
     @Override
     protected void onConnectionAttemptTimeout() {
-        setDirectConnectUnreachable(true, "silent direct connect");
+        if (lastAttemptUsedAutoConnect) {
+            // A background connect that outlived a full G7 slot (~5 min) plus margin is
+            // stuck (stack lost the request); a restart used to be the only cure. Retry
+            // once as a direct connect — if the sensor really is silent it times out
+            // with status 147/133 and flips back to autoConnect on its own.
+            setDirectConnectUnreachable(false, "autoConnect produced no callback in "
+                    + DEXCOM_AUTOCONNECT_WATCHDOG_MS + "ms");
+        } else {
+            setDirectConnectUnreachable(true, "silent direct connect");
+        }
     }
 
     @Override
