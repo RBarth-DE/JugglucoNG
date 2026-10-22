@@ -40,20 +40,32 @@ internal fun resolveSensorExpiryEndMs(preferredSensorId: String?, nowMs: Long): 
     return selectSensorExpiryEndMs(candidates, preferredSensorId, nowMs)
 }
 
-/** Per-sensor official end (serial -> ms, 0 = unknown) of every live gatt; null without a registry. */
-internal fun sensorExpiryCandidates(): List<Pair<String, Long>>? {
+/**
+ * Per-sensor end (serial -> ms, 0 = unknown) of every live gatt; null without a registry.
+ * [official] false asks for the expected end (e.g. Dexcom's grace period), falling back to
+ * the official one where a sensor has no separate expected end.
+ */
+internal fun sensorExpiryCandidates(official: Boolean = true): List<Pair<String, Long>>? {
     val gatts = try {
         SensorBluetooth.mygatts()
     } catch (t: Throwable) {
         null
     } ?: return null
     return gatts.map { gatt ->
-        val nativeEnd = runCatching { Natives.getSensorEndTime(gatt.dataptr, true) }.getOrDefault(0L)
+        val nativeOfficial = runCatching { Natives.getSensorEndTime(gatt.dataptr, true) }.getOrDefault(0L)
+        val nativeEnd = if (official) {
+            nativeOfficial
+        } else {
+            runCatching { Natives.getSensorEndTime(gatt.dataptr, false) }.getOrDefault(0L)
+                .takeIf { it > 0L } ?: nativeOfficial
+        }
         val end = if (nativeEnd > 0L) {
             nativeEnd
         } else {
             runCatching {
-                (gatt as? ManagedBluetoothSensorDriver)?.getManagedUiSnapshot()?.officialEndMs ?: 0L
+                val snapshot = (gatt as? ManagedBluetoothSensorDriver)?.getManagedUiSnapshot()
+                if (official) snapshot?.officialEndMs ?: 0L
+                else snapshot?.expectedEndMs?.takeIf { it > 0L } ?: snapshot?.officialEndMs ?: 0L
             }.getOrDefault(0L)
         }
         gatt.SerialNumber to end

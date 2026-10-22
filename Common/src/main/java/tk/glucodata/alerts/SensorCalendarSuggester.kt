@@ -33,7 +33,7 @@ internal object SensorCalendarSuggester {
         try {
             val prefs = Applic.app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             if (!prefs.getBoolean(PREF_ENABLED, true)) return
-            val candidates = sensorExpiryCandidates() ?: return
+            val candidates = sensorExpiryCandidates(official = false) ?: return
             for ((serial, endMs) in candidates) {
                 if (endMs <= nowMs) continue
                 val offered = prefs.getStringSet(PREF_OFFERED, emptySet()) ?: emptySet()
@@ -76,7 +76,8 @@ internal object SensorCalendarSuggester {
                 CalendarContract.Events.DESCRIPTION,
                 context.getString(R.string.sensor) + " " + serial + context.getString(R.string.endstime),
             )
-            // The hour before the sensor ends: enough time to start the next one.
+            // The hour before the expected end (Dexcom runs past its official one),
+            // enough time to start the next sensor.
             .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, endMs - EVENT_LEAD_MS)
             .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMs)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
