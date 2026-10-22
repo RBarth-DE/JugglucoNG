@@ -2589,6 +2589,10 @@ Durch Drücken von „OK“ wird eine Verbindung auf diesem Telefon hergestellt 
     <string name="stats_pinned_remove">Von der Startseite entfernen</string>
     <string name="stats_pinned_already">angeheftet</string>
     <string name="stats_pinned_remove_short">Entfernen</string>
+    <string name="sensor_calendar_suggest_title">Kalendereintrag zum Sensorende vorschlagen</string>
+    <string name="sensor_calendar_suggest_desc">Sobald ein Sensor verbunden ist und sein Enddatum bekannt ist, das Ende zum Eintragen in die Kalender-App anbieten</string>
+    <string name="sensor_calendar_notification_title">Sensorende</string>
+    <string name="sensor_calendar_notification_text">Tippen, um das Ende von Sensor %1$s in den Kalender einzutragen</string>
     <string name="sensor_handover_title">Automatische Sensor-Übergabe</string>
     <string name="sensor_handover_desc">Nachfolger früh aktivieren; nach Ablauf wechselt die App automatisch</string>
     <string name="sensor_handover_old_action_title">Abgelaufener Sensor nach der Übergabe</string>

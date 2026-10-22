@@ -622,8 +622,8 @@ public class ScanNfcV {
                                             ? "\n" + act.getString(R.string.libreview_account_id) + ": " + accountid
                                             : ""))
                     .setData(CalendarContract.Events.CONTENT_URI)
-                    .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, endtime)
-                    .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endtime + 1000L);
+                    .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, endtime - 3600_000L)
+                    .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endtime);
             {
                 if (doLog) {
                     Log.i(LOG_ID, "start calendar app");

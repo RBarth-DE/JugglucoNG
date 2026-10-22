@@ -78,6 +78,7 @@ import tk.glucodata.R
 import tk.glucodata.SensorBluetooth
 import tk.glucodata.SensorSourceResolver
 import tk.glucodata.share.DexcomShareSettings
+import tk.glucodata.alerts.SensorCalendarSuggester
 import tk.glucodata.alerts.SensorHandoverRuntime
 import tk.glucodata.data.calibration.CalibrationManager
 import tk.glucodata.data.ScheduledBackupSettings
@@ -226,6 +227,9 @@ fun ExpressiveSettingsScreen(
                 SensorHandoverRuntime.OLD_ACTION_DEACTIVATE
             )
         )
+    }
+    var sensorCalendarSuggest by remember {
+        mutableStateOf(handoverPrefs.getBoolean(SensorCalendarSuggester.PREF_ENABLED, true))
     }
     var showSensorHandoverActionDialog by remember { mutableStateOf(false) }
 
@@ -688,6 +692,18 @@ fun ExpressiveSettingsScreen(
                     iconTint = advColor,
                     position = CardPosition.MIDDLE,
                     onCheckedChange = { SensorBluetooth.setAutoconnect(it); autoConnect = it }
+                )
+                SettingsSwitchItem(
+                    title = stringResource(R.string.sensor_calendar_suggest_title),
+                    subtitle = stringResource(R.string.sensor_calendar_suggest_desc),
+                    checked = sensorCalendarSuggest,
+                    icon = Icons.Default.Event,
+                    iconTint = advColor,
+                    position = CardPosition.MIDDLE,
+                    onCheckedChange = {
+                        handoverPrefs.edit().putBoolean(SensorCalendarSuggester.PREF_ENABLED, it).apply()
+                        sensorCalendarSuggest = it
+                    }
                 )
                 SettingsSwitchItem(
                     title = stringResource(R.string.sensor_handover_title),

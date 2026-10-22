@@ -189,6 +189,7 @@ object AlertRuntimeManager {
         }
         evaluateSensorExpiryLocked(nowMs)
         SensorHandoverRuntime.evaluate(nowMs)
+        SensorCalendarSuggester.evaluate(nowMs)
         return standardAlertEvaluation
     }
 

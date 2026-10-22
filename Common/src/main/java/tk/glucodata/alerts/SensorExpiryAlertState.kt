@@ -36,12 +36,18 @@ internal fun selectSensorExpiryEndMs(
  * back to their UI snapshot.
  */
 internal fun resolveSensorExpiryEndMs(preferredSensorId: String?, nowMs: Long): Long {
+    val candidates = sensorExpiryCandidates() ?: return 0L
+    return selectSensorExpiryEndMs(candidates, preferredSensorId, nowMs)
+}
+
+/** Per-sensor official end (serial -> ms, 0 = unknown) of every live gatt; null without a registry. */
+internal fun sensorExpiryCandidates(): List<Pair<String, Long>>? {
     val gatts = try {
         SensorBluetooth.mygatts()
     } catch (t: Throwable) {
         null
-    } ?: return 0L
-    val candidates = gatts.map { gatt ->
+    } ?: return null
+    return gatts.map { gatt ->
         val nativeEnd = runCatching { Natives.getSensorEndTime(gatt.dataptr, true) }.getOrDefault(0L)
         val end = if (nativeEnd > 0L) {
             nativeEnd
@@ -52,7 +58,6 @@ internal fun resolveSensorExpiryEndMs(preferredSensorId: String?, nowMs: Long): 
         }
         gatt.SerialNumber to end
     }
-    return selectSensorExpiryEndMs(candidates, preferredSensorId, nowMs)
 }
 
 /**

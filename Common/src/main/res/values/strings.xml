@@ -2764,6 +2764,10 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="sibionics_reset_reminder_channel_desc">Reminders and actions for resetting Sibionics 2 before it expires</string>
     <string name="stats_span_days">%1$d days</string>
     <string name="stats_window_24h">24H</string>
+    <string name="sensor_calendar_suggest_title">Suggest calendar entry for sensor end</string>
+    <string name="sensor_calendar_suggest_desc">When a sensor connects and its end date is known, offer to add it to your calendar app</string>
+    <string name="sensor_calendar_notification_title">Sensor end date</string>
+    <string name="sensor_calendar_notification_text">Tap to add the end of sensor %1$s to your calendar</string>
     <string name="sensor_handover_title">Automatic sensor handover</string>
     <string name="sensor_handover_desc">Activate the next sensor early; the app switches when the current one expires</string>
     <string name="sensor_handover_old_action_title">Expired sensor after handover</string>
