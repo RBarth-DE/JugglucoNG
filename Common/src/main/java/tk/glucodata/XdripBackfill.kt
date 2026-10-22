@@ -21,7 +21,14 @@ object XdripBackfill {
     private const val MAX_RATE_LOOKBACK_MS = 60L * 60L * 1000L
     private const val PROCESS_DELAY_MS = 5_000L
 
-    data class Row(val timeMs: Long, val value: Float, val rawValue: Float, val rate: Float?)
+    /** [storedAtMs]: when the row first reached Room, or 0 when unknown. */
+    data class Row(
+        val timeMs: Long,
+        val value: Float,
+        val rawValue: Float,
+        val rate: Float?,
+        val storedAtMs: Long = 0L,
+    )
 
     /** One stored reading with the mg/dL a live send would carry for it. */
     data class DisplayedRow(val timeMs: Long, val mgdl: Int)
@@ -163,7 +170,7 @@ object XdripBackfill {
         return valid.mapIndexed { index, row ->
             val rate = row.rate?.takeIf { it.isFinite() && it != 0f }
                 ?: derivedRate(valid, shown, index)
-            XdripBackfillTracker.Candidate(row.timeMs, shown[index].toDouble(), rate)
+            XdripBackfillTracker.Candidate(row.timeMs, shown[index].toDouble(), rate, row.storedAtMs)
         }
     }
 
