@@ -31,12 +31,13 @@ internal fun selectSensorExpiryEndMs(
 }
 
 /**
- * Resolve the official end (start + wear duration) of the relevant sensor from
- * the live gatt registry. Kotlin-managed drivers without native backing fall
+ * Resolve the expected end of the relevant sensor from the live gatt registry
+ * (the official end, start + wear duration, where a sensor has no separate expected
+ * end; Dexcom keeps running past its official end). Kotlin-managed drivers without native backing fall
  * back to their UI snapshot.
  */
 internal fun resolveSensorExpiryEndMs(preferredSensorId: String?, nowMs: Long): Long {
-    val candidates = sensorExpiryCandidates() ?: return 0L
+    val candidates = sensorExpiryCandidates(official = false) ?: return 0L
     return selectSensorExpiryEndMs(candidates, preferredSensorId, nowMs)
 }
 
