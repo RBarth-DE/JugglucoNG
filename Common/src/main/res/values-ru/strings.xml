@@ -3230,4 +3230,5 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     </plurals>
     <string name="nightscout_upload_sensor_start">Отправлять запуск сенсора</string>
     <string name="nightscout_upload_sensor_start_desc">Отправлять событие Sensor Start для каждого сенсора (возраст, тип и серийный номер)</string>
+    <string name="ican_calibration_marker">Калибровка (F6)</string>
 </resources>

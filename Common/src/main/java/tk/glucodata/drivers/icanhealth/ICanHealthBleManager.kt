@@ -564,6 +564,9 @@ class ICanHealthBleManager(
         }
     }
 
+    override fun getSensorDetailTelemetry(): String =
+        ICanHealthConstants.formatCalibrationMarker(lastSensorInfoMarker)
+
     override fun getDetailedBleStatus(): String {
         if (uiPaused) {
             return ""
