@@ -150,6 +150,8 @@ import tk.glucodata.R
 import tk.glucodata.MainActivity
 import tk.glucodata.UiRefreshBus
 import android.widget.Toast
+import tk.glucodata.data.journal.JournalChartMarker
+import tk.glucodata.data.journal.JournalDashboardVisibility
 import tk.glucodata.data.journal.JournalEntry
 import tk.glucodata.data.journal.JournalEntryType
 import tk.glucodata.data.journal.JournalFood
@@ -184,7 +186,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.ui.platform.LocalUriHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.io.File
 import androidx.compose.material.icons.filled.ShowChart
@@ -394,6 +398,8 @@ fun DashboardScreen(
     val predictionCarbAbsorptionGramsPerHour by viewModel.predictionCarbAbsorptionGramsPerHour.collectAsStateWithLifecycle()
     val predictionHorizonMinutes by viewModel.predictionHorizonMinutes.collectAsStateWithLifecycle()
     val journalEntries by viewModel.journalEntries.collectAsStateWithLifecycle()
+    val journalTempBasals by viewModel.journalTempBasals.collectAsStateWithLifecycle()
+    val journalDashboardHiddenTypes by viewModel.journalDashboardHiddenTypes.collectAsStateWithLifecycle()
     val journalInsulinPresets by viewModel.journalInsulinPresets.collectAsStateWithLifecycle()
     val journalFoods by viewModel.journalFoods.collectAsStateWithLifecycle()
     val sensorStatus by viewModel.sensorStatus.collectAsStateWithLifecycle()
@@ -452,15 +458,40 @@ fun DashboardScreen(
     val scopedJournalEntries = remember(journalEnabled, journalEntries) {
         if (!journalEnabled) emptyList() else journalEntries
     }
+    // What the main screen draws: the types the journal settings leave shown, plus the AAPS
+    // temp basal icicles. Hiding is visual only — IOB, COB, the prediction and the dose
+    // hints below keep reading scopedJournalEntries, so a hidden bolus still counts.
+    val dashboardJournalEntries = remember(scopedJournalEntries, journalDashboardHiddenTypes) {
+        JournalDashboardVisibility.visible(scopedJournalEntries, journalDashboardHiddenTypes)
+    }
+    val dashboardTempBasals = remember(journalEnabled, journalTempBasals, journalDashboardHiddenTypes) {
+        if (!journalEnabled || JournalEntryType.TEMP_BASAL in journalDashboardHiddenTypes) {
+            emptyList()
+        } else {
+            journalTempBasals
+        }
+    }
     // Deliberately not keyed on glucoseHistory: the markers do not depend on it,
     // and keying on it rebuilt the list — and so recomposed the chart — on every
     // new reading, once a minute, for an identical result.
-    val journalChartMarkers = remember(journalEnabled, scopedJournalEntries, journalPresetsById, journalFoodsById, unit) {
-        if (!journalEnabled || scopedJournalEntries.isEmpty()) {
+    val journalRowMarkers = remember(journalEnabled, dashboardJournalEntries, journalPresetsById, journalFoodsById, unit) {
+        if (!journalEnabled || dashboardJournalEntries.isEmpty()) {
             emptyList()
         } else {
-            buildJournalChartMarkers(scopedJournalEntries, journalPresetsById, unit, journalFoodsById)
+            buildJournalChartMarkers(dashboardJournalEntries, journalPresetsById, unit, journalFoodsById)
         }
+    }
+    // Temp basals pile up from AAPS every few minutes and are never pruned, so their
+    // markers are built off the main thread. The previous markers stay up meanwhile.
+    val tempBasalMarkers by produceState(initialValue = emptyList<JournalChartMarker>(), dashboardTempBasals, unit) {
+        value = if (dashboardTempBasals.isEmpty()) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.Default) { buildJournalChartMarkers(dashboardTempBasals, emptyMap(), unit) }
+        }
+    }
+    val journalChartMarkers = remember(journalRowMarkers, tempBasalMarkers) {
+        if (tempBasalMarkers.isEmpty()) journalRowMarkers else journalRowMarkers + tempBasalMarkers
     }
     val localInsulinSummary = remember(journalEnabled, scopedJournalEntries, journalPresetsById, journalNow) {
         if (!journalEnabled || scopedJournalEntries.isEmpty()) {
@@ -1114,28 +1145,35 @@ fun DashboardScreen(
                     dashboardItemSpacing +
                     readingsTopSpacing
             }
-            val fullscreenChartItemHeight = remember(viewportHeight, chartViewportReserve) {
+            // Everything below the reserved header, which the row budgets are counted from.
+            val chartViewportHeight = remember(viewportHeight, chartViewportReserve) {
                 (viewportHeight - chartViewportReserve).coerceAtLeast(0.dp)
+            }
+            // Fully expanded still leaves the list's spacing under the range picker, the
+            // same gap it has above the pinned stats, rather than running into the bottom.
+            val fullscreenChartItemHeight = remember(chartViewportHeight, dashboardItemSpacing) {
+                (chartViewportHeight - dashboardItemSpacing).coerceAtLeast(0.dp)
             }
             val boundedFullscreenChartItemHeight = fullscreenChartItemHeight.coerceAtLeast(0.dp)
             val middleChartItemHeight = remember(
+                chartViewportHeight,
                 boundedFullscreenChartItemHeight,
                 measuredReadingBaselineHeight,
                 middleVisibleReadingRows
             ) {
-                (boundedFullscreenChartItemHeight - (measuredReadingBaselineHeight * middleVisibleReadingRows))
+                (chartViewportHeight - (measuredReadingBaselineHeight * middleVisibleReadingRows))
                     .coerceIn(0.dp, boundedFullscreenChartItemHeight)
             }
             val boundedMiddleChartItemHeight = middleChartItemHeight
                 .coerceAtLeast(0.dp)
                 .coerceAtMost(boundedFullscreenChartItemHeight)
             val collapsedChartItemHeight = remember(
-                boundedFullscreenChartItemHeight,
+                chartViewportHeight,
                 boundedMiddleChartItemHeight,
                 measuredReadingBaselineHeight,
                 defaultVisibleReadingRows
             ) {
-                (boundedFullscreenChartItemHeight - (measuredReadingBaselineHeight * defaultVisibleReadingRows))
+                (chartViewportHeight - (measuredReadingBaselineHeight * defaultVisibleReadingRows))
                     .coerceIn(0.dp, boundedMiddleChartItemHeight)
             }
             val boundedCollapsedChartItemHeight = collapsedChartItemHeight
@@ -1347,8 +1385,8 @@ fun DashboardScreen(
             val peerSeriesById = remember(multiSensorDisplay) {
                 multiSensorDisplay.series.associateBy { it.sensorId }
             }
-            val recentReadingJournalEntries = remember(recentReadings, scopedJournalEntries) {
-                groupJournalEntriesByReading(recentReadings, scopedJournalEntries)
+            val recentReadingJournalEntries = remember(recentReadings, consumerHistory, dashboardJournalEntries) {
+                groupJournalEntriesByReading(recentReadings, dashboardJournalEntries, history = consumerHistory)
             }
             val hasVisibleReadingContent = dashboardDataState.isFresh || recentReadings.isNotEmpty()
 
@@ -1876,6 +1914,10 @@ fun DashboardScreen(
                                 )
                     Box(
                         modifier = Modifier
+                            // Under every other item: expanded, the chart's grid carries on
+                            // behind the hero above and the readings below, and those cards
+                            // have to land on top of it, not under it.
+                            .zIndex(-1f)
                             .padding(horizontal = animatedChartHorizontalPadding.coerceAtLeast(0.dp))
                     ) {
                         Box(
@@ -1922,6 +1964,10 @@ fun DashboardScreen(
                                         expandedUnderlayBottom = 0.dp,
                                         onToggleExpanded = null,
                                         chartBoostProgress = chartBoostProgress,
+                                        // A whole viewport each way reaches the list's edges
+                                        // from anywhere the chart can sit; the list clips it.
+                                        backdropBleed = viewportHeight,
+                                        backdropContentInset = contentHorizontalPadding,
                                         onPointClick = { point ->
                                             clearJournalAction()
                                             triggerCalibrationIfEnabled(
@@ -1978,19 +2024,16 @@ fun DashboardScreen(
                         }
                     }
 
-                    // Shares the chart's item on purpose: the range chips are the last
-                    // thing inside it, so a separate item would put a full
-                    // `dashboardItemSpacing` between the chips and this strip.
+                    // Shares the chart's item so the gap above it can be set here. It is the
+                    // list's own spacing: the strip sits as far from the range picker as
+                    // the readings sit from the strip, collapsed or expanded.
                     if (showPinnedStats) {
                         FontScaleCap {
                             tk.glucodata.ui.stats.PinnedStatsStrip(
                                 modifier = Modifier.padding(
                                     start = contentHorizontalPadding,
                                     end = contentHorizontalPadding,
-                                    // Between the two extremes: a separate lazy item put a
-                                    // full 12 dp here and read as a hole, 2 dp had the strip
-                                    // welded to the chart card once the chart collapses.
-                                    top = 8.dp
+                                    top = dashboardItemSpacing
                                 ),
                                 windowState = pinnedStatsWindow
                             )
@@ -2164,7 +2207,7 @@ fun DashboardScreen(
                             suggestedChartAnchorGlucoseMgDl = suggestedGlucoseMgDl
                         )
                     },
-                    // Centred: at the end it sat on the newest reading's value.
+                    // The centre trough keeps the FAB clear of timestamps and glucose values.
                     modifier = Modifier.align(Alignment.BottomCenter),
                     horizontalAlignment = Alignment.CenterHorizontally
                 )

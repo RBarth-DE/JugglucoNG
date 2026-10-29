@@ -239,13 +239,25 @@ internal fun resolveAvailableTimelineRange(
     return StatsDateRange(startMillis = startMillis, endMillis = endMillis)
 }
 
+/**
+ * Journal entries keyed by the timestamp of the reading row they sit on.
+ *
+ * An entry snaps to its nearest reading in [history], and is kept only when that
+ * reading is one of [points]. A list that shows just the newest rows has to pass
+ * the full history: matched against the shown rows alone, a meter reading from
+ * 15:39 lands on the oldest shown row, 15:56, because that is the nearest reading
+ * the list happens to have (#730).
+ */
 fun groupJournalEntriesByReading(
     points: List<GlucosePoint>,
     entries: List<JournalEntry>,
-    maxDistanceMillis: Long = 20L * 60L * 1000L
+    maxDistanceMillis: Long = 20L * 60L * 1000L,
+    history: List<GlucosePoint> = points
 ): Map<Long, List<JournalEntry>> {
     if (points.isEmpty() || entries.isEmpty()) return emptyMap()
-    val sortedPoints = points.ascendingByTimestamp()
+    val sortedPoints = history.ascendingByTimestamp()
+    if (sortedPoints.isEmpty()) return emptyMap()
+    val shownTimestamps = if (history === points) null else points.mapTo(HashSet()) { it.timestamp }
     val grouped = linkedMapOf<Long, MutableList<JournalEntry>>()
 
     entries.forEach { entry ->
@@ -266,6 +278,7 @@ fun groupJournalEntriesByReading(
         }
 
         val targetPoint = closestPoint ?: return@forEach
+        if (shownTimestamps != null && targetPoint.timestamp !in shownTimestamps) return@forEach
         if (closestDistance <= maxDistanceMillis) {
             grouped.getOrPut(targetPoint.timestamp) { mutableListOf() }.add(entry)
         }
@@ -379,6 +392,7 @@ private fun JournalEntryType.historyFilterIcon(): ImageVector = when (this) {
     JournalEntryType.FINGERSTICK -> Icons.Default.Bloodtype
     JournalEntryType.ACTIVITY -> Icons.Default.DirectionsRun
     JournalEntryType.NOTE -> Icons.Default.Label
+    JournalEntryType.TEMP_BASAL -> Icons.Default.Vaccines
 }
 
 private fun HistoryFilterOption.historyFilterIcon(): ImageVector = when (this) {
@@ -457,7 +471,7 @@ fun HistoryBrowseScreen(
     var viewportSnapshot by remember { mutableStateOf<ChartViewportSnapshot?>(null) }
     var showReadingRows by rememberSaveable { mutableStateOf(true) }
     var selectedJournalTypeFilters by rememberSaveable {
-        mutableStateOf(JournalEntryType.entries.map { it.name })
+        mutableStateOf(JournalEntryType.journalRowTypes.map { it.name })
     }
     val selectedJournalTypes = remember(selectedJournalTypeFilters) {
         selectedJournalTypeFilters.mapNotNull { name ->
@@ -754,7 +768,7 @@ fun HistoryBrowseScreen(
                 item(key = "history-journal-filter") {
                     val filterOptions = remember {
                         listOf(HistoryFilterOption.Readings) +
-                            JournalEntryType.entries.map { HistoryFilterOption.Journal(it) }
+                            JournalEntryType.journalRowTypes.map { HistoryFilterOption.Journal(it) }
                     }
                     val selectedFilterOptions = remember(showReadingRows, selectedJournalTypes) {
                         buildList {

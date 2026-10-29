@@ -156,7 +156,7 @@ Reach for these before building a surface by hand.
 | A short wait with no progress to show | `LoadingIndicator` | material3 |
 | A progress bar | `LinearWavyProgressIndicator` | material3 |
 | An icon-only button | the button inside `IconButtonTooltip(label)`, label = its content description | `components/IconButtonTooltip.kt` |
-| A "+" that offers several kinds of thing | `FloatingActionButtonMenu` + `ToggleFloatingActionButton` | material3; journal items 44dp, 8dp apart, labelLarge, 16dp ends; FABs keep the spec 16dp corner and 16dp inset; centred on the dashboard, where the end sat on the newest value; press and slide off the button, or hold it, and lift on an item to pick it, as in a menu (`JournalExpandableFab`) |
+| A "+" that offers several kinds of thing | `FloatingActionButtonMenu` + `ToggleFloatingActionButton` | material3; journal items 44dp, 8dp apart, labelLarge, 16dp ends; FABs keep the spec 16dp corner and 16dp inset; bottom-centre on the dashboard with centred pills, between timestamps and right-aligned glucose values; primaryContainer/onPrimaryContainer at rest, surfaceContainerHighest/onSurface when open; opaque semantic tints over a dismissible bottom-up gradient scrim, transparent through the top 35%, 55% black at 70%, and 78% black at the bottom; use Glucose in action labels and entry-sheet titles; press and slide off the button, or hold it, and lift on an item to pick it, as in a menu (`JournalExpandableFab`) |
 | Add at a point on the chart | `JournalFloatingActionMenu` | One column of the FAB menu's 44dp items, one width, centred on the tapped time's dot (where the chart draws it, followed as the screen moves) and 24dp beside it, left past the middle, inside the plot (top to time chip) whenever it fits; only a column taller than the plot rises past it, never past the window. Items spring out of the dot, middle first, (`motionScheme.fastSpatialSpec`) and fold back into it; corners on the dot's side sharpen with nearness to it; the long-pressing finger can slide onto an item, pressed under it, and lift there to pick it |
 | Actions on a multi-selection | `HorizontalFloatingToolbar`; the screen keeps its top bar | material3 |
 | Pick one value from a short list | `DropdownMenuPopup` + `DropdownMenuGroup` + `SelectableDropdownMenuItem` | material3 |
@@ -242,6 +242,16 @@ read at 18dp.
 - Anything holding text gets a minimum height, not a height: `heightIn(min = 56.dp)` on a
   button or a text field, never `height(56.dp)`. A fixed height cuts the text off at large
   font sizes.
+- A label beside an action uses `AdaptiveTrailingRow` when the action could crowd out
+  the text. It keeps a reading width that grows with font size (and is never narrower than
+  the longest word) and moves the action below when needed. Its slots must support
+  intrinsic measurement; keep lazy lists and `BoxWithConstraints` outside them. Sibling
+  action buttons that share a line equally use `AdaptiveButtonRow`: equal widths while
+  every label fits on one line, one full-width line each when one would wrap. Don't use a
+  `FlowRow` of weighted buttons for this; it breaks lines on the shortest word, so the
+  labels wrap inside the buttons instead.
+- Journal menus share the chart's 1.3× font cap because their positions follow the chart
+  geometry. Chart menu width stays inside the window; long labels ellipsize on one line.
 
 ---
 

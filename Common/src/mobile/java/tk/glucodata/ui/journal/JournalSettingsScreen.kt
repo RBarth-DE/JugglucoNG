@@ -41,6 +41,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AreaChart
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CheckCircle
@@ -53,10 +54,12 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Vaccines
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.History
 
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -69,6 +72,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -84,6 +88,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -128,7 +133,10 @@ import tk.glucodata.ui.components.CardPosition
 import tk.glucodata.ui.components.ColorSwatchButton
 import tk.glucodata.ui.components.CompactSheetDragHandle
 import tk.glucodata.ui.ExpressiveColorPickerDialog
+import tk.glucodata.ui.InsulinChartStyle
+import tk.glucodata.ui.InsulinChartStyleState
 import tk.glucodata.ui.components.MasterSwitchCard
+import tk.glucodata.data.journal.JournalEntryType
 import tk.glucodata.ui.components.SectionLabel
 import tk.glucodata.ui.components.SettingsItem
 import tk.glucodata.ui.components.SettingsSwitchItem
@@ -175,6 +183,7 @@ fun JournalSettingsScreen(
 ) {
     val journalEnabled by viewModel.journalEnabled.collectAsStateWithLifecycle()
     val journalNavigationTabEnabled by viewModel.journalNavigationTabEnabled.collectAsStateWithLifecycle()
+    val journalDashboardHiddenTypes by viewModel.journalDashboardHiddenTypes.collectAsStateWithLifecycle()
     val journalDoseCalculatorEnabled by viewModel.journalDoseCalculatorEnabled.collectAsStateWithLifecycle()
     val journalFoodLibraryEnabled by viewModel.journalFoodLibraryEnabled.collectAsStateWithLifecycle()
     val journalQuickAddAlwaysNow by viewModel.journalQuickAddAlwaysNow.collectAsStateWithLifecycle()
@@ -185,6 +194,20 @@ fun JournalSettingsScreen(
     val allFoods by viewModel.journalFoods.collectAsStateWithLifecycle()
     val activePresets = remember(allPresets) { allPresets.filter { !it.isArchived } }
     val activeFoods = remember(allFoods) { allFoods.filter { !it.isArchived } }
+    val insulinChartStyle = InsulinChartStyleState.style
+    var showInsulinChartStyleDialog by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    if (showInsulinChartStyleDialog) {
+        InsulinChartStylePickerDialog(
+            current = insulinChartStyle,
+            onSelect = {
+                InsulinChartStyleState.set(context, it)
+                showInsulinChartStyleDialog = false
+            },
+            onDismiss = { showInsulinChartStyleDialog = false }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -212,113 +235,8 @@ fun JournalSettingsScreen(
                 )
             }
 
-            item(key = "journal_access_group") {
-                val showCurrentTimeOption = journalEnabled && journalDashboardQuickAddButton
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    SettingsSwitchItem(
-                        title = stringResource(R.string.journal_show_tab_title),
-                        subtitle = stringResource(R.string.journal_show_tab_desc),
-                        checked = journalNavigationTabEnabled,
-                        onCheckedChange = { viewModel.setJournalNavigationTabEnabled(it) },
-                        icon = Icons.Default.EditNote,
-                        iconTint = MaterialTheme.colorScheme.primary,
-                        position = CardPosition.TOP,
-                        enabled = journalEnabled
-                    )
-                    SettingsSwitchItem(
-                        title = stringResource(R.string.journal_dashboard_quickadd_title),
-                        subtitle = stringResource(R.string.journal_dashboard_quickadd_desc),
-                        checked = journalDashboardQuickAddButton,
-                        onCheckedChange = { viewModel.setJournalDashboardQuickAddButton(it) },
-                        icon = Icons.Default.Add,
-                        iconTint = MaterialTheme.colorScheme.primary,
-                        position = if (showCurrentTimeOption) CardPosition.MIDDLE else CardPosition.BOTTOM,
-                        enabled = journalEnabled
-                    )
-                    AnimatedVisibility(
-                        visible = showCurrentTimeOption,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        SettingsSwitchItem(
-                            title = stringResource(R.string.journal_quickadd_always_now_title),
-                            subtitle = stringResource(R.string.journal_quickadd_always_now_desc),
-                            checked = journalQuickAddAlwaysNow,
-                            onCheckedChange = { viewModel.setJournalQuickAddAlwaysNow(it) },
-                            icon = Icons.Default.History,
-                            iconTint = MaterialTheme.colorScheme.secondary,
-                            position = CardPosition.BOTTOM,
-                            enabled = journalEnabled
-                        )
-                    }
-                }
-            }
-            item(key = "open_journal") {
-                JournalActionRow(
-                    onHistoryClick = {
-                        navController.navigate(
-                            if (journalNavigationTabEnabled) "journal" else "settings/journal/history"
-                        )
-                    }
-                )
-            }
-            item(key = "journal_intelligence") {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    SettingsSwitchItem(
-                        title = stringResource(R.string.journal_dose_math_title),
-                        subtitle = stringResource(R.string.journal_dose_calculator_desc),
-                        checked = journalDoseCalculatorEnabled,
-                        onCheckedChange = { viewModel.setJournalDoseCalculatorEnabled(it) },
-                        icon = Icons.Default.Calculate,
-                        iconTint = MaterialTheme.colorScheme.primary,
-                        position = CardPosition.TOP,
-                        enabled = journalEnabled
-                    )
-                    // The profile, absorption, eIOB and the dose hints all live behind one
-                    // row: they are calculations on the profile, not journal tools.
-                    SettingsItem(
-                        title = stringResource(R.string.journal_calculations_title),
-                        subtitle = stringResource(R.string.journal_calculations_desc),
-                        onClick = if (journalEnabled) {
-                            { navController.navigate("settings/journal/calculations") }
-                        } else {
-                            null
-                        },
-                        icon = Icons.Default.Schedule,
-                        iconTint = MaterialTheme.colorScheme.secondary,
-                        position = CardPosition.MIDDLE
-                    )
-                    SettingsItem(
-                        title = stringResource(R.string.journal_import_health_activity),
-                        onClick = if (journalEnabled) {
-                            { viewModel.setJournalHealthConnectActivityEnabled(!journalHealthConnectActivityEnabled) }
-                        } else {
-                            null
-                        },
-                        icon = Icons.AutoMirrored.Filled.DirectionsRun,
-                        iconTint = MaterialTheme.colorScheme.secondary,
-                        trailingContent = {
-                            StyledSwitch(
-                                checked = journalHealthConnectActivityEnabled,
-                                onCheckedChange = { viewModel.setJournalHealthConnectActivityEnabled(it) },
-                                enabled = journalEnabled
-                            )
-                        },
-                        position = CardPosition.MIDDLE
-                    )
-                    SettingsSwitchItem(
-                        title = stringResource(R.string.journal_aaps_import_title),
-                        subtitle = stringResource(R.string.journal_aaps_import_desc),
-                        checked = aapsJournalImportEnabled,
-                        onCheckedChange = { viewModel.setAapsJournalImportEnabled(it) },
-                        icon = Icons.Default.Restore,
-                        iconTint = MaterialTheme.colorScheme.tertiary,
-                        position = CardPosition.BOTTOM,
-                        enabled = journalEnabled
-                    )
-                }
-            }
-
+            // What the journal holds comes first: the libraries are what people open this
+            // screen to edit, and History is the way into the entries themselves.
             item(key = "journal_libraries") {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SettingsItem(
@@ -343,244 +261,294 @@ fun JournalSettingsScreen(
                     )
                 }
             }
+
+            item(key = "open_journal") {
+                JournalHistoryButton(
+                    onClick = {
+                        navController.navigate(
+                            if (journalNavigationTabEnabled) "journal" else "settings/journal/history"
+                        )
+                    }
+                )
+            }
+
+            item(key = "main_screen") {
+                val showCurrentTimeOption = journalEnabled && journalDashboardQuickAddButton
+                Column {
+                    SectionLabel(text = stringResource(R.string.journal_section_main_screen), topPadding = 8.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.journal_show_tab_title),
+                            subtitle = stringResource(R.string.journal_show_tab_desc),
+                            checked = journalNavigationTabEnabled,
+                            onCheckedChange = { viewModel.setJournalNavigationTabEnabled(it) },
+                            icon = Icons.Default.EditNote,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            position = CardPosition.TOP,
+                            enabled = journalEnabled
+                        )
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.journal_dashboard_quickadd_title),
+                            subtitle = stringResource(R.string.journal_dashboard_quickadd_desc),
+                            checked = journalDashboardQuickAddButton,
+                            onCheckedChange = { viewModel.setJournalDashboardQuickAddButton(it) },
+                            icon = Icons.Default.Add,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            position = CardPosition.MIDDLE,
+                            enabled = journalEnabled
+                        )
+                        AnimatedVisibility(
+                            visible = showCurrentTimeOption,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            SettingsSwitchItem(
+                                title = stringResource(R.string.journal_quickadd_always_now_title),
+                                subtitle = stringResource(R.string.journal_quickadd_always_now_desc),
+                                checked = journalQuickAddAlwaysNow,
+                                onCheckedChange = { viewModel.setJournalQuickAddAlwaysNow(it) },
+                                icon = Icons.Default.History,
+                                iconTint = MaterialTheme.colorScheme.secondary,
+                                position = CardPosition.MIDDLE,
+                                enabled = journalEnabled
+                            )
+                        }
+                        SettingsItem(
+                            title = stringResource(R.string.journal_entry_types_title),
+                            subtitle = journalEntryTypesSummary(journalDashboardHiddenTypes),
+                            onClick = if (journalEnabled) {
+                                { navController.navigate("settings/journal/entry-types") }
+                            } else {
+                                null
+                            },
+                            icon = Icons.Default.Visibility,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            position = CardPosition.MIDDLE
+                        )
+                        SettingsItem(
+                            title = stringResource(R.string.journal_insulin_chart_title),
+                            subtitle = stringResource(insulinChartStyle.labelRes()),
+                            onClick = { showInsulinChartStyleDialog = true },
+                            icon = Icons.Default.AreaChart,
+                            iconTint = MaterialTheme.colorScheme.tertiary,
+                            position = CardPosition.BOTTOM
+                        )
+                    }
+                }
+            }
+
+            item(key = "dosing") {
+                Column {
+                    SectionLabel(text = stringResource(R.string.journal_section_dosing), topPadding = 8.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.journal_dose_math_title),
+                            subtitle = stringResource(R.string.journal_dose_calculator_desc),
+                            checked = journalDoseCalculatorEnabled,
+                            onCheckedChange = { viewModel.setJournalDoseCalculatorEnabled(it) },
+                            icon = Icons.Default.Calculate,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            position = CardPosition.TOP,
+                            enabled = journalEnabled
+                        )
+                        // The profile, absorption, eIOB and the dose hints all live behind one
+                        // row: they are calculations on the profile, not journal tools.
+                        SettingsItem(
+                            title = stringResource(R.string.journal_calculations_title),
+                            subtitle = stringResource(R.string.journal_calculations_desc),
+                            onClick = if (journalEnabled) {
+                                { navController.navigate("settings/journal/calculations") }
+                            } else {
+                                null
+                            },
+                            icon = Icons.Default.Schedule,
+                            iconTint = MaterialTheme.colorScheme.secondary,
+                            position = CardPosition.BOTTOM
+                        )
+                    }
+                }
+            }
+
+            item(key = "import") {
+                Column {
+                    SectionLabel(text = stringResource(R.string.journal_section_import), topPadding = 8.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.journal_import_health_activity),
+                            subtitle = stringResource(R.string.journal_import_health_activity_desc),
+                            checked = journalHealthConnectActivityEnabled,
+                            onCheckedChange = { viewModel.setJournalHealthConnectActivityEnabled(it) },
+                            icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                            iconTint = MaterialTheme.colorScheme.secondary,
+                            position = CardPosition.TOP,
+                            enabled = journalEnabled
+                        )
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.journal_aaps_import_title),
+                            subtitle = stringResource(R.string.journal_aaps_import_desc),
+                            checked = aapsJournalImportEnabled,
+                            onCheckedChange = { viewModel.setAapsJournalImportEnabled(it) },
+                            icon = Icons.Default.Restore,
+                            iconTint = MaterialTheme.colorScheme.tertiary,
+                            position = CardPosition.BOTTOM,
+                            enabled = journalEnabled
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+/** "All shown", "All hidden", or the hidden types by name, in the order the switches list them. */
 @Composable
-private fun JournalActionRow(
-    onHistoryClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        JournalActionButton(
-            text = stringResource(R.string.historyname),
-            icon = Icons.Default.History,
-            enabled = true,
-            prominent = true,
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onHistoryClick
+private fun journalEntryTypesSummary(hiddenTypes: Set<JournalEntryType>): String {
+    val hidden = JournalEntryType.entries.filter { it in hiddenTypes }
+    return when (hidden.size) {
+        0 -> stringResource(R.string.journal_entry_types_all_shown)
+        JournalEntryType.entries.size -> stringResource(R.string.journal_entry_types_all_hidden)
+        else -> stringResource(
+            R.string.journal_entry_types_hidden,
+            hidden.map { it.journalActionLabel() }.joinToString(", ")
         )
     }
 }
 
+/** Which journal entry types the main chart and the reading list draw. */
 @Composable
-private fun JournalActionButton(
-    text: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    prominent: Boolean = false,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
+fun JournalEntryTypesSettingsScreen(
+    navController: NavController,
+    viewModel: DashboardViewModel
 ) {
-    FilledTonalButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(if (prominent) 48.dp else 36.dp),
-        colors = if (prominent) {
-            ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        } else {
-            ButtonDefaults.filledTonalButtonColors()
-        },
-        contentPadding = PaddingValues(horizontal = if (prominent) 16.dp else 16.dp),
-        shapes = ButtonDefaults.shapes()
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(if (prominent) 20.dp else 16.dp)
-        )
-        Spacer(modifier = Modifier.width(if (prominent) 8.dp else 8.dp))
-        Text(
-            text = text,
-            style = if (prominent) MaterialTheme.typography.titleMediumEmphasized else MaterialTheme.typography.labelLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-@Composable
-private fun JournalIntelligenceCard(
-    journalEnabled: Boolean,
-    doseCalculatorEnabled: Boolean,
-    onDoseCalculatorChange: (Boolean) -> Unit,
-    foodMacrosEnabled: Boolean,
-    onFoodMacrosChange: (Boolean) -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (journalEnabled) 1f else 0.58f),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(28.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            JournalIntelligenceRow(
-                title = stringResource(R.string.journal_dose_math_title),
-                subtitle = stringResource(R.string.journal_dose_calculator_desc),
-                icon = Icons.Default.Calculate,
-                iconTint = MaterialTheme.colorScheme.primary,
-                checked = doseCalculatorEnabled,
-                enabled = journalEnabled,
-                onCheckedChange = onDoseCalculatorChange
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(start = 56.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f)
-            )
-            JournalIntelligenceRow(
-                title = stringResource(R.string.journal_food_macros_title),
-                subtitle = stringResource(R.string.journal_food_macros_desc),
-                icon = Icons.Default.Restaurant,
-                iconTint = MaterialTheme.colorScheme.secondary,
-                checked = foodMacrosEnabled,
-                enabled = journalEnabled,
-                onCheckedChange = onFoodMacrosChange
+    val journalEnabled by viewModel.journalEnabled.collectAsStateWithLifecycle()
+    val journalDashboardHiddenTypes by viewModel.journalDashboardHiddenTypes.collectAsStateWithLifecycle()
+
+    Scaffold(
+        topBar = {
+            AppTopBar(
+                title = stringResource(R.string.journal_entry_types_title),
+                onNavigateBack = { navController.popBackStack() },
             )
         }
-    }
-}
-
-@Composable
-private fun JournalIntelligenceRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.52f)
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        IconTile(
-            icon = icon,
-            tint = if (checked) iconTint else MaterialTheme.colorScheme.onSurfaceVariant,
-            containerColor = IconTileDefaults.toggleContainerColor(iconTint, checked),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        StyledSwitch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled
-        )
-    }
-}
-
-@Composable
-private fun JournalLibraryHub(
-    activeFoods: Int,
-    totalFoods: Int,
-    activeInsulin: Int,
-    totalInsulin: Int,
-    onFoodClick: () -> Unit,
-    onInsulinClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        JournalLibraryTile(
-            title = stringResource(R.string.journal_food_library),
-            subtitle = stringResource(R.string.journal_food_library_count, activeFoods, totalFoods),
-            icon = Icons.Default.Restaurant,
-            tint = MaterialTheme.colorScheme.secondary,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 28.dp),
-            modifier = Modifier.weight(1f),
-            onClick = onFoodClick
-        )
-        JournalLibraryTile(
-            title = stringResource(R.string.journal_insulin_library),
-            subtitle = stringResource(R.string.journal_insulin_library_count, activeInsulin, totalInsulin),
-            icon = Icons.Default.Vaccines,
-            tint = MaterialTheme.colorScheme.tertiary,
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 28.dp, bottomStart = 28.dp, bottomEnd = 20.dp),
-            modifier = Modifier.weight(1f),
-            onClick = onInsulinClick
-        )
-    }
-}
-
-@Composable
-private fun JournalLibraryTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    tint: Color,
-    shape: RoundedCornerShape,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 132.dp),
-        color = tint.copy(alpha = 0.13f),
-        shape = shape
-    ) {
-        Column(
+    ) { padding ->
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(padding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
-                modifier = Modifier.size(48.dp),
-                color = tint.copy(alpha = 0.20f),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = tint,
-                        modifier = Modifier.size(24.dp)
+            item(key = "dashboard_types") {
+                Column {
+                    SectionLabel(text = stringResource(R.string.journal_dashboard_types_title), topPadding = 8.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        JournalEntryType.entries.forEachIndexed { index, type ->
+                            SettingsSwitchItem(
+                                title = type.journalActionLabel(),
+                                subtitle = if (type == JournalEntryType.TEMP_BASAL) {
+                                    stringResource(R.string.journal_dashboard_temp_basal_desc)
+                                } else {
+                                    null
+                                },
+                                checked = type !in journalDashboardHiddenTypes,
+                                onCheckedChange = { viewModel.setJournalTypeShownOnDashboard(type, it) },
+                                icon = type.journalActionIcon(),
+                                iconTint = journalTypeColor(type),
+                                position = cardPosition(index, JournalEntryType.entries.size),
+                                enabled = journalEnabled
+                            )
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.journal_dashboard_types_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLargeEmphasized,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
+    }
+}
+
+private fun InsulinChartStyle.labelRes(): Int = when (this) {
+    InsulinChartStyle.STACKED -> R.string.journal_insulin_chart_stacked
+    InsulinChartStyle.STACKED_WITH_DOSES -> R.string.journal_insulin_chart_stacked_with_doses
+    InsulinChartStyle.SEPARATE -> R.string.journal_insulin_chart_separate
+}
+
+@Composable
+private fun InsulinChartStylePickerDialog(
+    current: InsulinChartStyle,
+    onSelect: (InsulinChartStyle) -> Unit,
+    onDismiss: () -> Unit
+) {
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)) {
+                Text(
+                    text = stringResource(R.string.journal_insulin_chart_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                InsulinChartStyle.entries.forEach { style ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable { onSelect(style) }
+                            .padding(horizontal = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = current == style, onClick = null)
+                        Spacer(Modifier.width(16.dp))
+                        Text(stringResource(style.labelRes()), style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes(), contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JournalHistoryButton(onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        ),
+        shapes = ButtonDefaults.shapes()
+    ) {
+        Icon(
+            imageVector = Icons.Default.History,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = stringResource(R.string.historyname),
+            style = MaterialTheme.typography.titleMediumEmphasized,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1921,7 +1889,7 @@ private fun JournalInsulinPresetSheet(
                                 },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                                 modifier = Modifier
-                                    .height(32.dp)
+                                    .heightIn(min = 32.dp)
                                     .widthIn(max = 132.dp),
                                 shapes = ButtonDefaults.shapes()
                             ) {

@@ -213,23 +213,15 @@ public class Applic extends Application implements androidx.work.Configuration.P
         ;
     }
 
-    public static boolean isWatchNotifyEnabled() {
-        return Notify.alertwatch;
-    }
-
-    public static void setWatchNotifyEnabled(boolean on) {
-        if (app != null) {
-            app.setnotify(on);
-        } else {
-            Notify.alertwatch = on;
-        }
-    }
-
     public void setunit(int unit) {
+        // First label legacy rows using the old preference, then refresh their
+        // display projection after changing it. Startup sets units separately.
+        CalibrationProfileAccess.onDisplayUnitChanged();
         if (Applic.unit != unit)
             SuperGattCallback.previousglucosevalue = 0.0f;
         Natives.setunit(unit);
         Notify.mkunitstr(app, unit);
+        CalibrationProfileAccess.onDisplayUnitChanged();
     }
 
     public void sendlabels() {

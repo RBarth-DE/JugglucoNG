@@ -85,6 +85,7 @@ import tk.glucodata.ui.journal.JournalEntrySheet
 import tk.glucodata.ui.journal.JournalFoodLibraryScreen
 import tk.glucodata.ui.journal.JournalInsulinLibraryScreen
 import tk.glucodata.ui.journal.JournalCalculationsSettingsScreen
+import tk.glucodata.ui.journal.JournalEntryTypesSettingsScreen
 import tk.glucodata.ui.journal.JournalScreen
 import tk.glucodata.ui.journal.JournalSettingsScreen
 import tk.glucodata.ui.viewmodel.DashboardViewModel
@@ -1006,6 +1007,8 @@ private fun NavGraphBuilder.appDestinations(
     composable("settings/glucose-meters") { GlucoseMeterSettingsScreen(navController) }
     composable("settings/insulin-pens") { InsulinPenSettingsScreen(navController) }
     composable("settings/watch") { WatchSettingsScreen(navController) }
+    composable("settings/phone-apps") { PhoneAppsSettingsScreen(navController, dashboardViewModel) }
+    composable("settings/sensor-connection") { SensorConnectionSettingsScreen(navController) }
     // Keep legacy route for backward compatibility.
     composable("settings/weartransport") { WatchSettingsScreen(navController) }
     composable("settings/watch/wearos-config") { WearOsConfigScreen(navController) }
@@ -1039,6 +1042,7 @@ private fun NavGraphBuilder.appDestinations(
     composable("settings/alerts/talker") { tk.glucodata.ui.alerts.TalkerSettingsScreen(navController) }
     composable("settings/journal") { JournalSettingsScreen(navController, dashboardViewModel) }
     composable("settings/journal/calculations") { JournalCalculationsSettingsScreen(navController, dashboardViewModel) }
+    composable("settings/journal/entry-types") { JournalEntryTypesSettingsScreen(navController, dashboardViewModel) }
     composable("settings/journal/history") {
         JournalSettingsHistoryRoute(
             dashboardViewModel = dashboardViewModel,

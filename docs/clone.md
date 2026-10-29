@@ -81,6 +81,13 @@ glucose entries.
 Deleting a connection is different: it removes that saved pairing. A new QR
 scan is then required to recreate it.
 
+While a sensor arrives over Clone, the receiver leaves its Bluetooth alone. To
+read it from the receiver instead — for example while the sender is switched
+off or out of range — tap **Take over sensor** on the receiver's sensor card.
+The receiver then connects to the sensor itself; a sensor that serves one phone
+at a time is reached once the sender lets go of it. **Return sensor to sender**
+on the same card undoes this.
+
 **Keep Clone live in background** is optional and intended mainly for a
 receiver that must get readings and alerts with minimum delay. It holds a
 partial Android wake lock while an enabled receiver connection exists. This
@@ -92,6 +99,31 @@ run again.
 local discovery so nearby devices can find the phone without scanning a QR.
 Changing this option does not replace an already working Clone connection. The
 saved choice is used the next time that connection negotiates.
+
+Manual calibration profiles synchronize in both directions between a connection's
+master (glucose sender) and receiver, including Raw/Auto points, calibration
+settings, and deletion of the last point.
+They are read from the calibration database even for sensors without native
+sensor files. A newer local manual profile takes precedence over an older
+incoming profile. Journal-derived calibration points are maintained locally
+from the journal and are preserved when a manual profile arrives.
+
+The master retrieves receiver-entered calibrations during the next normal
+calibration synchronization, including after reconnection. The glucose pairing
+can remain receive-only on the receiver; no second pairing is needed. Both
+phones must run a version supporting this return exchange. Older peers keep
+the existing master-to-receiver behavior. Edits and deletions are retained
+locally while disconnected and compared by revision when the link returns.
+Profiles carry their glucose units, so the two phones can use different
+mg/dL or mmol/L display preferences.
+
+Calibration points retain their saved units across display-preference changes and
+profile/backup transfers. Startup restores the saved unit before starting native
+connections, so legacy rows without unit information keep that interpretation at
+their first load. Past unrecorded unit changes cannot be reconstructed.
+Return-profile discovery covers the full known sensor roster independently of the
+forward calibration cursor. Competing receiver imports are serialized through the
+revision check, replacement, and accepted-revision publication.
 
 The other Hybrid transport switches also take effect on the next connection
 attempt. Changing a server address, port, username, password, or which

@@ -961,6 +961,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         final boolean outboundApiEnabled = OutboundApiSettings.isEnabled(app);
         // Credentials and the pending queue live on the phone, so the watch never sends.
         final boolean dexcomShareEnabled = !isWearable && DexcomShareSettings.isEnabled(app);
+        final boolean followerFeedEnabled = !isWearable && XdripFollowerSend.isEnabled(app);
         final boolean loopFeedEnabled = Natives.getxbroadcast() || (!isWearable && Natives.getlibrelinkused());
         final boolean shouldResolveExchangePayload =
                 Natives.getJugglucobroadcast()
@@ -968,6 +969,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 || dexcomShareEnabled
                 || (shouldBroadcastMinuteUpdate && (
                         loopFeedEnabled
+                        || followerFeedEnabled
                         || doWearInt
                         || doGadgetbridge));
         final ExchangeGlucosePayload exchangePayload = shouldResolveExchangePayload
@@ -987,7 +989,8 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                 !isWearable && doWearInt,
                 !isWearable && doGadgetbridge,
                 loopFeedEnabled,
-                dexcomShareEnabled);
+                dexcomShareEnabled,
+                followerFeedEnabled);
         // The loop feed shares the same payload JUGGLUCO/OUTBOUND_API get: it is resolved from the
         // same gl/rate/timmsec this call received, so reusing it can never carry a stale timestamp.
         final ExchangeGlucosePayload loopFeedPayload = exchangeOutputDecision.getSendLoopFeed()
@@ -1036,7 +1039,8 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             if (!isWearable) {
                 if (Natives.getlibrelinkused() && loopFeedPayload != null)
                     XInfuus.sendGlucoseBroadcast(loopFeedPayload.getSensorId(), loopFeedPayload.getPrimaryMgdl(), loopFeedPayload.getRate(), loopFeedPayload.getTimeMillis(), sensorstartmsec);
-                // SendNSClient.broadcastglucose(mgdl, rate, timmsec);
+                if (exchangeOutputDecision.getSendXdripFollower())
+                    XdripFollowerSend.broadcastGlucose(app, exchangePayload);
             }
             if (Natives.getxbroadcast() && loopFeedPayload != null) {
                 if (doLog)

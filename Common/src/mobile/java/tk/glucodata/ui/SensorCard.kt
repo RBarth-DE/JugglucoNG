@@ -82,7 +82,6 @@ import tk.glucodata.BLE_ERROR_CARD_WINDOW_MS
 import tk.glucodata.Notify
 import tk.glucodata.R
 import tk.glucodata.SensorHandoffUiState
-import tk.glucodata.SensorTypeName
 import tk.glucodata.SensorVendor
 import tk.glucodata.SensorVisuals
 import tk.glucodata.SensorBadge
@@ -1947,13 +1946,12 @@ fun SensorCard(
                             onPickColor = { showColorSheet = true },
                             modifier = Modifier.weight(1f),
                         )
-                        if (!sensor.isCloneSource) {
+                        val cloneWithoutControl = sensor.isCloneSource && !sensor.canTakeOverClone
+                        if (!cloneWithoutControl) {
                             Spacer(modifier = Modifier.width(8.dp))
                         }
 
-                        if (sensor.isCloneSource) {
-                            // Nothing to pause on a sensor another phone is wearing.
-                        } else if (isHandedOff) {
+                        if (isHandedOff && !sensor.isCloneSource) {
                             IconButtonTooltip(stringResource(R.string.return_sensor_to_phone)) {
                                 // A filled icon button, not a background behind a plain one: the
                                 // container itself takes the press shape.
@@ -1969,6 +1967,42 @@ fun SensorCard(
                                     Icon(
                                         imageVector = Icons.Default.PhoneAndroid,
                                         contentDescription = stringResource(R.string.return_sensor_to_phone),
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    )
+                                }
+                            }
+                        } else if (cloneWithoutControl) {
+                            // Nothing this phone could read it with: no button.
+                        } else if (sensor.isCloneSource || sensor.isCloneTakenOver) {
+                            // Nothing to pause on a sensor another phone is wearing. The slot
+                            // moves the sensor between the sender and this phone instead, as
+                            // the watch's take-over does. The watch's return comes first: a
+                            // taken-over sensor sitting on the watch has to come back here
+                            // before it can go back to the sender.
+                            val label = stringResource(
+                                if (sensor.isCloneSource) R.string.clone_take_over_sensor
+                                else R.string.clone_return_sensor_to_sender
+                            )
+                            IconButtonTooltip(label) {
+                                FilledIconButton(
+                                    onClick = {
+                                        if (sensor.isCloneSource) {
+                                            viewModel.takeOverCloneSensor(sensor.serial)
+                                        } else {
+                                            viewModel.handBackCloneSensor(sensor.serial)
+                                        }
+                                    },
+                                    modifier = Modifier.size(48.dp),
+                                    shapes = IconButtonDefaults.shapes(),
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    ),
+                                ) {
+                                    Icon(
+                                        imageVector = if (sensor.isCloneSource) Icons.Default.Bluetooth else Icons.Default.SwapHoriz,
+                                        contentDescription = label,
                                         modifier = Modifier.size(24.dp),
                                         tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     )
@@ -2200,6 +2234,9 @@ fun SensorCard(
                         if (!(sensor.isCloneSource && sensor.deviceAddress.equals("Unknown", ignoreCase = true))) {
                             DataRow(stringResource(R.string.sensor_address), sensor.deviceAddress)
                         }
+                        if (sensor.dexcomPairingCode.isNotEmpty()) {
+                            DataRow(stringResource(R.string.dexcom_pairing_code), sensor.dexcomPairingCode)
+                        }
                     
                         // FIX: Use Long timestamp directly to avoid String Parsing Locale bugs in formatSensorTime
                         // User reported "100% Fill / Red Color" bug in English Locale, likely due to startMs being 0 or parse fail.
@@ -2385,14 +2422,22 @@ fun SensorCard(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Edit 79 rev: Sensor Data Mode — ConnectedButtonGroup
-            if (sensor.isSibionics || sensor.supportsDisplayModes) {
+            // Libre 1/2 export their two lanes as Stream (Auto) and the sensor's own
+            // 15-minute History (Raw), so the same four modes switch between them.
+            val isLibreStreamHistory = sensor.hasLibreHistoryLane
+            if (sensor.isSibionics || sensor.supportsDisplayModes || isLibreStreamHistory) {
                 Text(
                     stringResource(R.string.data_mode),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                val modeLabels = listOf(
+                val modeLabels = if (isLibreStreamHistory) listOf(
+                    stringResource(R.string.streamname),
+                    stringResource(R.string.historyname),
+                    stringResource(R.string.stream_history_mode),
+                    stringResource(R.string.history_stream_mode)
+                ) else listOf(
                     stringResource(R.string.auto),
                     stringResource(R.string.raw),
                     stringResource(R.string.auto_raw),
@@ -2419,6 +2464,14 @@ fun SensorCard(
                     unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                     unselectedContentColor = MaterialTheme.colorScheme.onSurface
                 )
+                if (isLibreStreamHistory) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.libre_history_mode_caption),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Both managed algorithms replace the Auto lane; pure Raw hides this entry.
