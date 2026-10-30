@@ -32,6 +32,8 @@
 #include <fcntl.h>
 #include <mutex>
 #include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <thread>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -44,6 +46,11 @@
 
 #include "ContextHTTPS.hpp"
 #include "ElapsedRealtime.hpp"
+#include "TurnStreamRelay.hpp"
+#include "TurnStreamFrames.hpp"
+#ifdef __APPLE__
+#define TCP_KEEPIDLE TCP_KEEPALIVE
+#endif
 
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
@@ -546,6 +553,40 @@ static int SSLwritefull(SSL* ssl, const char *dataptr,const int buflen) {
 
 
 
+static bool verifyTLSHost(SSL *ssl,const std::string &hostName) {
+       #ifdef DLSYMS_SSL
+       if(!SSL_get_peer_certificateptr||!SSL_get_verify_resultptr||
+          !X509_check_hostptr||!X509_check_ip_ascptr||!X509_freeptr||
+          !X509_verify_cert_error_stringptr) {
+          LOGARHTTPS("Missing TLS hostname verification functions");
+          return false;
+          }
+       #endif
+       long verify_result = SSL_get_verify_result(ssl);
+       if (verify_result != X509_V_OK) {
+          LOGGERHTTPS("Certificate verification failed: %s\n", X509_verify_cert_error_string(verify_result));
+          return false;
+          }
+       X509 *peerCertificate=SSL_get_peer_certificate(ssl);
+       if(!peerCertificate) {
+          LOGARHTTPS("Rendezvous server did not provide a certificate");
+          return false;
+          }
+       destruct freeCertificate{[peerCertificate]{X509_free(peerCertificate);}};
+       in_addr ipv4{};
+       in6_addr ipv6{};
+       const bool isIPAddress=inet_pton(AF_INET,hostName.c_str(),&ipv4)==1||
+                              inet_pton(AF_INET6,hostName.c_str(),&ipv6)==1;
+       const int hostMatches=isIPAddress
+           ?X509_check_ip_asc(peerCertificate,hostName.c_str(),0)
+           :X509_check_host(peerCertificate,hostName.c_str(),hostName.size(),0,nullptr);
+       if(hostMatches!=1) {
+          LOGGERHTTPS("Rendezvous certificate hostname mismatch for %s\n",hostName.c_str());
+          return false;
+          }
+    return true;
+}
+
 std::pair<std::vector<char>,int> ContextHTTPS::request(const std::string_view host,int port,const std::string_view path,const std::string_view TYPE,const std::span<const char> input, const std::string_view header,const HTTPSRequestOptions &options) {
     std::vector<char> uit;   
     if(error) {
@@ -596,38 +637,8 @@ std::pair<std::vector<char>,int> ContextHTTPS::request(const std::string_view ho
        LOGGERHTTPS("SSL handshake failed: %s\n", mess.c_str());
         return {uit,-1};
        }
-    if(options.verifyCertificate) {
-       #ifdef DLSYMS_SSL
-       if(!SSL_get_peer_certificateptr||!SSL_get_verify_resultptr||
-          !X509_check_hostptr||!X509_check_ip_ascptr||!X509_freeptr||
-          !X509_verify_cert_error_stringptr) {
-          LOGARHTTPS("Missing TLS hostname verification functions");
-          return {uit,-1};
-          }
-       #endif
-       long verify_result = SSL_get_verify_result(ssl);
-       if (verify_result != X509_V_OK) {
-          LOGGERHTTPS("Certificate verification failed: %s\n", X509_verify_cert_error_string(verify_result));
-          return {uit,-1};
-          }
-       X509 *peerCertificate=SSL_get_peer_certificate(ssl);
-       if(!peerCertificate) {
-          LOGARHTTPS("Rendezvous server did not provide a certificate");
-          return {uit,-1};
-          }
-       destruct freeCertificate{[peerCertificate]{X509_free(peerCertificate);}};
-       in_addr ipv4{};
-       in6_addr ipv6{};
-       const bool isIPAddress=inet_pton(AF_INET,hostName.c_str(),&ipv4)==1||
-                              inet_pton(AF_INET6,hostName.c_str(),&ipv6)==1;
-       const int hostMatches=isIPAddress
-           ?X509_check_ip_asc(peerCertificate,hostName.c_str(),0)
-           :X509_check_host(peerCertificate,hostName.c_str(),hostName.size(),0,nullptr);
-       if(hostMatches!=1) {
-          LOGGERHTTPS("Rendezvous certificate hostname mismatch for %s\n",hostName.c_str());
-          return {uit,-1};
-          }
-       }
+    if(options.verifyCertificate&&!verifyTLSHost(ssl,hostName))
+        return {uit,-1};
     const char closebuf[]{"\r\nConnection: close\r\n\r\n"};
     strsepconcat req {""sv,TYPE , " "sv,path," HTTP/1.1\r\nHost: "sv , host , "\r\nContent-Length: "sv,std::to_string(input.size()), header,closebuf};
 
@@ -701,6 +712,176 @@ std::pair<std::vector<char>,int> ContextHTTPS::request(const std::string_view ho
         }
     return {uit,status_code};
     }
+// TURN-over-stream adapter. It shares the HTTP client's TLS loader and trust
+// store, but owns its connection, framing and cancellation for one ICE agent.
+TurnStreamRelay::TurnStreamRelay(std::string name,uint16_t service,bool secure)
+    : host(std::move(name)),port(service),tls(secure) {}
+
+std::unique_ptr<TurnStreamRelay> TurnStreamRelay::start(std::string host,uint16_t port,bool tls) {
+    auto relay=std::unique_ptr<TurnStreamRelay>(new TurnStreamRelay(std::move(host),port,tls));
+    relay->datagramSocket=socket(AF_INET,SOCK_DGRAM,0);
+    if(relay->datagramSocket<0) return {};
+    sockaddr_in local{};
+    local.sin_family=AF_INET;
+    local.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+    if(::bind(relay->datagramSocket,reinterpret_cast<sockaddr *>(&local),sizeof(local))<0)
+        return {};
+    socklen_t length=sizeof(local);
+    if(getsockname(relay->datagramSocket,reinterpret_cast<sockaddr *>(&local),&length)<0)
+        return {};
+    relay->localPort=ntohs(local.sin_port);
+    const int flags=fcntl(relay->datagramSocket,F_GETFL,0);
+    if(flags<0||fcntl(relay->datagramSocket,F_SETFL,flags|O_NONBLOCK)<0) return {};
+    relay->worker=std::jthread([ptr=relay.get()] { ptr->run(); });
+    return relay;
+}
+
+TurnStreamRelay::~TurnStreamRelay() {
+    cancel();
+    if(worker.joinable()) worker.join();
+    if(datagramSocket>=0) close(datagramSocket);
+}
+
+void TurnStreamRelay::run() {
+    const auto trace=[&](const char *stage) {
+#ifdef TEST_TURN_STREAM
+        if(getenv("CLONE_TURN_TEST_LOG"))
+            std::fprintf(stderr,"TURN stream %s:%u: %s\n",host.c_str(),port,stage);
+#else
+        (void)stage;
+#endif
+    };
+    // A peer closing a TLS stream must not terminate the process. This mask
+    // belongs only to this dedicated worker, not the rest of the application.
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigaddset(&signals,SIGPIPE);
+    pthread_sigmask(SIG_BLOCK,&signals,nullptr);
+    // Do not open an external connection until libjuice actually uses this
+    // relay. No credentials enter this adapter or its diagnostics.
+    const HTTPSRequestOptions options{.timeoutMilliseconds=10000,.cancelled=cancelled};
+    RequestDeadline deadline(options);
+    int stream=-1;
+    SSL *ssl=nullptr;
+    destruct cleanup{[&] {
+        if(ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+        if(stream>=0) { shutdown(stream,SHUT_RDWR); close(stream); }
+    }};
+    sockaddr_in client{};
+    bool haveClient=false;
+    std::array<char,65560> packet{};
+    std::vector<char> incoming;
+    TurnStreamRequests requests;
+    incoming.reserve(65560);
+    const auto stopped=[&] { return cancelled->load(std::memory_order_acquire); };
+    const auto connectStream=[&] {
+        deadline.restart(10000);
+        stream=tcp_connect(host,port,deadline);
+        if(stream<0) {trace("TCP connect failed");return false;}
+        trace("TCP connected");
+#ifdef SO_NOSIGPIPE
+        const int noSignal=1;
+        setsockopt(stream,SOL_SOCKET,SO_NOSIGPIPE,&noSignal,sizeof(noSignal));
+#endif
+        if(!tls) return true;
+        auto &context=ContextHTTPS::getContext();
+        if(context.error||!context.ctx) return false;
+        ssl=SSL_new(context.ctx);
+        if(!ssl) return false;
+        SSL_set_fd(ssl,stream);
+        SSL_set_tlsext_host_name2(ssl,host.c_str());
+        int result;
+        while((result=SSL_connect(ssl))!=1)
+            if(SSLwait(ssl,result,stream,deadline)<0) {trace("TLS handshake failed");return false;}
+        const bool verified=!stopped()&&verifyTLSHost(ssl,host);
+        trace(verified?"TLS verified":"TLS verification failed");
+        return verified;
+    };
+    const auto writeStream=[&](std::span<const char> bytes) {
+        deadline.restart(5000);
+        size_t sent=0;
+        while(sent<bytes.size()&&!deadline.stopped()) {
+            const int count=ssl?SSL_write(ssl,bytes.data()+sent,bytes.size()-sent):
+                send(stream,bytes.data()+sent,bytes.size()-sent,
+#ifdef MSG_NOSIGNAL
+                     MSG_NOSIGNAL
+#else
+                     0
+#endif
+                );
+            if(count>0) { sent+=count; continue; }
+            if(ssl) {
+                if(SSLwait(ssl,count,stream,deadline)<0) return false;
+            } else if(count<0&&(errno==EAGAIN||errno==EWOULDBLOCK)) {
+                if(!waitForSocket(stream,POLLOUT,deadline)) return false;
+            } else if(count<0&&errno==EINTR) continue;
+            else return false;
+        }
+        return sent==bytes.size()&&!stopped();
+    };
+    while(!stopped()) {
+        pollfd sockets[2]{{.fd=datagramSocket,.events=POLLIN},
+                          {.fd=stream,.events=POLLIN}};
+        const int ready=poll(sockets,stream<0?1:2,250);
+        if(ready<0) { if(errno==EINTR) continue; return; }
+        if(sockets[0].revents&(POLLERR|POLLNVAL)) return;
+        if(sockets[0].revents&POLLIN) {
+            sockaddr_in sender{};
+            socklen_t senderSize=sizeof(sender);
+            const int bytes=recvfrom(datagramSocket,packet.data(),packet.size()-3,0,
+                                    reinterpret_cast<sockaddr *>(&sender),&senderSize);
+            if(bytes<0) { if(errno==EAGAIN||errno==EWOULDBLOCK||errno==EINTR) continue; return; }
+            if(sender.sin_addr.s_addr!=htonl(INADDR_LOOPBACK)) {trace("non-loopback sender rejected");continue;}
+            if(haveClient&&sender.sin_port!=client.sin_port) continue;
+            const auto frame=turnStreamFrame({packet.data(),static_cast<size_t>(bytes)});
+            if(!frame||!frame->wireBytes||frame->payloadBytes!=static_cast<size_t>(bytes)) {trace("invalid client framing");continue;}
+            if(requests.accept({packet.data(),static_cast<size_t>(bytes)})) {
+                if(!haveClient) trace("first client frame accepted");
+                if(!haveClient) { client=sender; haveClient=true; }
+                if(stream<0&&!connectStream()) return;
+                std::fill(packet.begin()+bytes,packet.begin()+frame->wireBytes,0);
+                if(!writeStream({packet.data(),frame->wireBytes})) return;
+            } else trace("duplicate request suppressed");
+        }
+        if(stream<0) continue;
+        if(sockets[1].revents&(POLLERR|POLLNVAL)) return;
+        if(!(sockets[1].revents&(POLLIN|POLLHUP))) continue;
+        while(!stopped()) {
+            const int bytes=ssl?SSL_read(ssl,packet.data(),packet.size()):
+                               recv(stream,packet.data(),packet.size(),0);
+            if(bytes<=0) {
+                if(ssl) {
+                    const int error=SSL_get_error(ssl,bytes);
+                    if(error==SSL_ERROR_WANT_READ) break;
+                    if(error==SSL_ERROR_WANT_WRITE) {
+                        deadline.restart(5000);
+                        if(waitForSocket(stream,POLLOUT,deadline)) continue;
+                    }
+                } else if(bytes<0&&(errno==EAGAIN||errno==EWOULDBLOCK)) break;
+                else if(bytes<0&&errno==EINTR) continue;
+                return;
+            }
+            trace("server bytes received");
+            incoming.insert(incoming.end(),packet.begin(),packet.begin()+bytes);
+            size_t consumed=0;
+            while(consumed<incoming.size()) {
+                const auto frame=turnStreamFrame(std::span(incoming).subspan(consumed));
+                if(!frame) return;
+                if(!frame->wireBytes||frame->wireBytes>incoming.size()-consumed) break;
+                if(frame->payloadBytes>65507) return;
+                if(!turnStreamServerFrameAllowed(std::span(incoming).subspan(consumed,frame->payloadBytes))) {
+                    trace("malformed frame or transport-changing redirect rejected");return;
+                }
+                if(sendto(datagramSocket,incoming.data()+consumed,frame->payloadBytes,0,
+                          reinterpret_cast<sockaddr *>(&client),sizeof(client))<0) return;
+                consumed+=frame->wireBytes;
+            }
+            incoming.erase(incoming.begin(),incoming.begin()+consumed);
+            if(incoming.size()>65560) return;
+        }
+    }
+}
+
 #ifdef MAIN
 int main() {
   ContextHTTPS context;

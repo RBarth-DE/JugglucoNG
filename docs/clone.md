@@ -63,11 +63,20 @@ service only once, including when one of these names is configured manually.
 If a server rejects the receiver's answer after delivering an offer, Clone
 restarts the negotiation with the other servers enabled.
 
+TURN relay fallback also uses a pool. A custom TURN server has priority and keeps
+the bundled services as backups. Clone tries up to two relays at once, preferring
+different transports and providers, and changes its choices when an ICE attempt
+fails. A rendezvous-only retry keeps the same relay choices. Bundled pools can
+include regional services and TCP or verified TLS connections, including TLS on
+port 443 for networks that block UDP. The custom TURN editor still configures
+UDP. Optional Twilio credentials refresh in the background; an unavailable token
+service does not block the other relays or restart a working negotiation.
+
 ## Security and privacy
 
 Quick Pair generates a random Clone connection password. The Mirror protocol
 uses authenticated ASCON encryption when that password is present, including
-when packets travel through TURN. TURN therefore does not need TLS to keep the
+when packets travel through TURN. TURN does not need TLS to keep the
 glucose payload private from the relay operator.
 
 The rendezvous connection uses HTTPS. Certificate chain and hostname
@@ -275,7 +284,7 @@ realm=clone.example.com
 user=cloneuser:REPLACE_WITH_THE_GENERATED_SECRET
 stale-nonce=600
 
-# JugglucoNG currently uses UDP TURN.
+# This example configures UDP TURN; bundled pools can also use TCP/TLS.
 no-tcp
 no-tls
 no-tcp-relay
