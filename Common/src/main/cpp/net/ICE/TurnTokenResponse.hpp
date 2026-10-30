@@ -69,7 +69,7 @@ class TurnTokenReader {
         whitespace();
         if(position==text.size()) return false;
         if(text[position]=='"') {std::string ignored;return string(ignored);}
-        for(const auto pair:{std::pair{'{','}'},std::pair{'[',']'}}) {
+        for(const auto &pair:{std::pair{'{','}'},std::pair{'[',']'}}) {
             if(text[position]!=pair.first) continue;
             ++position;
             if(take(pair.second)) return true;
