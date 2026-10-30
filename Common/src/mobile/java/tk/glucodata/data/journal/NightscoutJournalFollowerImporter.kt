@@ -3,6 +3,8 @@ package tk.glucodata.data.journal
 import androidx.annotation.Keep
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import tk.glucodata.Applic
@@ -14,12 +16,21 @@ import tk.glucodata.data.HistoryDatabase
 object NightscoutJournalFollowerImporter : NightscoutTreatmentImportBridge {
     private const val LOG_ID = "NightscoutJournalFollowerImporter"
 
+    /**
+     * Held while a follower posts its own entries to the server it reads. An import landing
+     * between a document's POST and the row being marked as uploaded would not yet know the
+     * document is ours, and would add it again as a Nightscout row.
+     */
+    internal val followerSendLock = Mutex()
+
     @Keep
     override fun importTreatments(sensorId: String, treatmentsJson: String): Int = runBlocking {
-        withContext(Dispatchers.IO) {
-            runCatching { importInternal(sensorId, treatmentsJson) }
-                .onFailure { Log.e(LOG_ID, "importTreatments failed: ${Log.stackline(it)}") }
-                .getOrDefault(0)
+        followerSendLock.withLock {
+            withContext(Dispatchers.IO) {
+                runCatching { importInternal(sensorId, treatmentsJson) }
+                    .onFailure { Log.e(LOG_ID, "importTreatments failed: ${Log.stackline(it)}") }
+                    .getOrDefault(0)
+            }
         }
     }
 
