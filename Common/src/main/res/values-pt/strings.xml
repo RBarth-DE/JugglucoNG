@@ -3172,4 +3172,5 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     </plurals>
     <string name="nightscout_upload_sensor_start">Enviar início do sensor</string>
     <string name="nightscout_upload_sensor_start_desc">Enviar um evento Sensor Start por sensor (idade, tipo e número de série)</string>
+    <string name="ican_calibration_marker">Calibração (F6)</string>
 </resources>
