@@ -21,7 +21,8 @@ struct TurnRelay {
     std::string provider, region;
 
     bool sameService(const TurnRelay &other) const {
-        return host == other.host && port == other.port && transport == other.transport;
+        return host == other.host && port == other.port && transport == other.transport &&
+               username == other.username && password == other.password;
     }
     bool operator==(const TurnRelay &) const = default;
 };

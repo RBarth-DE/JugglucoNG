@@ -113,9 +113,27 @@ int main() {
     auto incomplete = relay("invalid"); incomplete.password.clear();
     appendTurnRelay(pool, incomplete);
     assert(pool.size() == 2);
+    // Accounts on the same service can have independent quotas/revocations.
+    // Retain both a different username and a password-only replacement.
+    auto otherAccount=pool.front();otherAccount.username="backup-user";
+    appendTurnRelay(pool,otherAccount);
+    auto otherPassword=pool.front();otherPassword.password="backup-password";
+    appendTurnRelay(pool,otherPassword);
+    appendTurnRelay(pool,otherAccount); // exact account duplicate still collapses
+    assert(pool.size()==4);
+    TurnRelayRotation accounts;
+    std::set<std::pair<std::string,std::string>> attemptedAccounts;
+    for(uint64_t generation=1;generation<=pool.size();++generation) {
+        const auto selected=accounts.select(pool,generation);
+        attemptedAccounts.emplace(selected.front().username,selected.front().password);
+        accounts.beginAttempt(generation);
+        accounts.failedAttempt(generation);
+    }
+    assert(attemptedAccounts.contains({"backup-user","password"}));
+    assert(attemptedAccounts.contains({"user","backup-password"}));
     // Preserve explicitly configured anonymous/self-hosted TURN services.
     incomplete.username.clear();
     appendTurnRelay(pool, incomplete, true);
-    assert(pool.size() == 3 && pool.back().username.empty());
+    assert(pool.size() == 5 && pool.back().username.empty());
     std::puts("TURN pool: diversity, rotation, stale generations, dedupe and configuration changes passed");
 }

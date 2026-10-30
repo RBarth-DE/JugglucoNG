@@ -139,6 +139,10 @@ The TLS case delays its handshake to exercise queued request retransmissions,
 and a separate TLS case blocks external UDP on both peers.
 Run `python3 tools/test-turn-stream.py` for fragmented/coalesced frames, TLS trust /
 hostname rejection, and cancellation during a held TLS handshake.
+`python3 tools/test-context-https.py` checks complete HTTP replies across TLS
+records, length/chunked/close framing, and bounded cancellation/truncation.
+HTTPS signaling/token replies allow up to 32 KiB of headers/trailers and 1 MiB
+of body; incomplete replies fail without exposing partial data as success.
 
 For a bounded live provider test, supply a private `JUGGLUCO_TURN_LIVE_JSON` array
 using the same relay-entry schema, then run `python3 tools/test-clone-turn.py --live`.

@@ -46,6 +46,7 @@
 
 #include "ContextHTTPS.hpp"
 #include "ElapsedRealtime.hpp"
+#include "HttpResponseReader.hpp"
 #include "TurnStreamRelay.hpp"
 #include "TurnStreamFrames.hpp"
 #ifdef __APPLE__
@@ -480,41 +481,6 @@ static int SSLwait(SSL *ssl,int result,int sock,const RequestDeadline &deadline)
     return -1;
     }
 
-static int SSLreadfull(SSL* ssl,int sock,char *dataptr,const int buflen,
-                       const RequestDeadline &deadline) {
-    LOGGERHTTPS("start SSLreadfull %d\n", buflen);
-    int n=0;
-     while(!deadline.stopped()) {
-        if(n>=buflen) {
-            LOGGERHTTPS("SSL_read all %d\n",n);
-            break;
-            }
-        const int res=SSL_read(ssl, dataptr+n,buflen-n);
-        if(res>0) {
-            LOGGERHTTPS("SSLread %d\n",res);
-            n+=res;
-            continue;
-            }
-        if(SSLwait(ssl,res,sock,deadline)==0)
-                continue;
-        int err = SSL_get_error(ssl, res);
-        if (err == SSL_ERROR_SSL) {
-            unsigned long e = ERR_get_error();
-            constexpr const int maxbuf=200;
-            char buf[maxbuf];
-            ERR_error_string_n(e, buf, maxbuf);
-            LOGGERHTTPS("SSL_read SSL_ERROR %s\n",buf);
-            }
-        else {
-            if(err == SSL_ERROR_SYSCALL) {
-                lerror("SSL_read syscall error");
-                }
-            }
-         break;
-        }
-    LOGGERHTTPS("end SSLreadfull %d\n",n);
-    return n;
-    }
     /*
 static int SSLwritefull(SSL* ssl, const char *dataptr,const int buflen) {
     LOGGERHTTPS("start SSLwritefull %d",buflen);
@@ -668,50 +634,27 @@ std::pair<std::vector<char>,int> ContextHTTPS::request(const std::string_view ho
    LOGGERHTTPS("after SSL_write %d\n", requestsize);
    if(options.responseTimeoutMilliseconds>0)
        deadline.restart(options.responseTimeoutMilliseconds);
-   int n;
-   while((n=SSL_read(ssl,dataptr,maxdata))<=0) {
-       if(SSLwait(ssl,n,sock,deadline)<0)
-           return {uit,-1};
+   HttpResponseReader response;
+   while(!deadline.stopped()) {
+       const int count=SSL_read(ssl,dataptr,std::min(maxdata,16*1024));
+       if(count>0) {
+           if(!response.append({dataptr,static_cast<size_t>(count)}))
+               return {{},-1};
+           if(response.complete())
+               return {response.takeBody(),response.status()};
+           continue;
        }
-   LOGGERHTTPS("after SSL_read=%d\n", n);
-   char *enddata=dataptr+n;
-   int   status_code=-1;
-   char *startpos;
-   if((startpos=std::find(dataptr,enddata,' '))!=enddata) {
-        int end=sscanf(++startpos,"%d",&status_code);
-        startpos+=end;
-        }
-    else {
-        LOGGERHTTPS("no space in #%s# len=%d\n",dataptr,n);
-        return {uit,-1};
-        }
-    LOGGERHTTPS("Status Code=%d\n",status_code);
-    char zoek[]="\r\n\r\n";
-    if(char *hit=std::search(startpos,enddata,zoek,zoek+sizeof(zoek)-1);hit!=enddata) {
-        hit+=sizeof(zoek)-1;
-        int len= enddata-hit;
-        uit.reserve(len);
-        #ifdef __cpp_lib_containers_ranges
-        uit.append_range(std::span<char>(hit,len));
-        #else
-            uit.insert(uit.end(), hit, hit+len);
-        #endif
-        if(n==maxdata) {
-            do {
-                int n=SSLreadfull(ssl,sock,dataptr,maxdata,deadline);
-                if(n<=0)
-                    break;
-                uit.reserve(uit.capacity()+n);
-        #ifdef __cpp_lib_containers_ranges
-                uit.append_range(std::span<char>(dataptr,n));
-                #else
-                  uit.insert(uit.end(), dataptr, dataptr+n);
-                  #endif
-                } while(n==maxdata);
-            }
-        }
-    return {uit,status_code};
-    }
+       // Only a TLS close-notify completes a close-delimited response. A
+       // timeout, cancellation, truncated body, or abrupt TLS failure must
+       // not expose partial JSON / signaling with a successful HTTP code.
+       if(SSL_get_error(ssl,count)==SSL_ERROR_ZERO_RETURN) {
+           if(response.closed()) return {response.takeBody(),response.status()};
+           return {{},-1};
+       }
+       if(SSLwait(ssl,count,sock,deadline)<0) return {{},-1};
+   }
+   return {{},-1};
+}
 // TURN-over-stream adapter. It shares the HTTP client's TLS loader and trust
 // store, but owns its connection, framing and cancellation for one ICE agent.
 TurnStreamRelay::TurnStreamRelay(std::string name,uint16_t service,bool secure)

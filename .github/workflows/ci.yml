@@ -44,6 +44,8 @@ jobs:
         run: python3 tools/test-clone-turn.py --streams
       - name: Test TURN TLS verification, stream framing and cancellation
         run: python3 tools/test-turn-stream.py
+      - name: Test complete HTTPS token and rendezvous replies
+        run: python3 tools/test-context-https.py
       - name: Test Clone rendezvous failover between servers
         run: python3 tools/test-rendezvous-failover.py
       - name: Test manual calibration transfer without native sensor records
