@@ -14,6 +14,27 @@ sys.path.insert(0, str(ROOT / 'scripts/dist'))
 import turn
 
 
+def stream_test(executable, mode, environment):
+    # Keep normal CI output short, but retain transport stages and sanitized
+    # libjuice diagnostics when a relay fails or its cleanup times out.
+    environment = dict(environment, CLONE_TURN_TEST_LOG='1')
+    def failure_output(result):
+        for data in (result.stdout, result.stderr):
+            if data:
+                print(data.decode(errors='replace') if isinstance(data, bytes) else data,
+                      file=sys.stderr, flush=True)
+    try:
+        result = subprocess.run([str(executable), mode], timeout=90,
+                                env=environment, capture_output=True, text=True)
+    except subprocess.TimeoutExpired as error:
+        failure_output(error)
+        raise
+    if result.returncode:
+        failure_output(result)
+    result.check_returncode()
+    print(result.stdout, end='', flush=True)
+
+
 def main():
     live = '--live' in sys.argv[1:]
     streams = '--streams' in sys.argv[1:] or live
@@ -71,7 +92,7 @@ def main():
                 for mode in ('--stream-tcp', '--stream-tls', '--stream-tls-no-udp'):
                     print('Relay delivery through ' + mode, flush=True)
                     environment['TURN_TEST_HANDSHAKE_DELAY_MS'] = '1500' if mode != '--stream-tcp' else '0'
-                    subprocess.run([str(executable), mode], check=True, timeout=90, env=environment)
+                    stream_test(executable, mode, environment)
         if live:
             # A stable path lets host firewalls retain the owner's approval.
             # The binary embeds only synthetic fixture credentials; live
