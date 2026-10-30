@@ -1,6 +1,5 @@
 package tk.glucodata.ui
 
-import androidx.compose.material3.FilterChipDefaults
 import tk.glucodata.ui.components.IconButtonTooltip
 import androidx.compose.material3.IconButtonDefaults
 import android.widget.Toast
@@ -26,8 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Api
 import androidx.compose.material.icons.filled.Science
@@ -45,6 +42,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -727,18 +725,43 @@ fun NightscoutSettingsScreen(navController: NavController) {
                             NightscoutCardHeading(stringResource(R.string.nightscout_follow_interval_title)) {
                                 help = NightscoutHelp.POLLING
                             }
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                NightscoutFollowerPollPolicy.CHOICES_MINUTES.forEach { minutes ->
-                                    FilterChip(
-                                        selected = pollMinutes == minutes,
-                                        onClick = {
-                                            pollMinutes = minutes
-                                            NightscoutFollowerRegistry.savePollMinutes(context, minutes)
-                                        },
-                                        label = { Text(stringResource(R.string.minutes_short_format, minutes)) },
-                                        shapes = FilterChipDefaults.shapes(),
-                                        colors = FilterChipDefaults.filterChipColors()
-                                    )
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                val options = NightscoutFollowerPollPolicy.CHOICES_MINUTES
+                                val labels = options.associateWith {
+                                    stringResource(R.string.minutes_short_format, it)
+                                }
+                                val textMeasurer = rememberTextMeasurer()
+                                val labelStyle = MaterialTheme.typography.labelLarge
+                                val density = LocalDensity.current
+                                val widestLabel = with(density) {
+                                    labels.values.maxOf {
+                                        textMeasurer.measure(it, style = labelStyle).size.width
+                                    }.toDp()
+                                }
+                                // Keep equal columns, reflowing before translated or enlarged
+                                // labels need to shrink. Each choice has 24dp of breathing room.
+                                val columns = listOf(3, 2, 1).first {
+                                    (widestLabel + 24.dp) * it +
+                                        ButtonGroupDefaults.ConnectedSpaceBetween * (it - 1) <= maxWidth || it == 1
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    options.chunked(columns).forEach { row ->
+                                        ConnectedButtonGroup(
+                                            options = row,
+                                            selectedOption = pollMinutes,
+                                            onOptionSelected = { minutes ->
+                                                pollMinutes = minutes
+                                                NightscoutFollowerRegistry.savePollMinutes(context, minutes)
+                                            },
+                                            label = {},
+                                            labelText = { labels.getValue(it) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            itemHeight = 48.dp,
+                                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                                            selectedContentColor = MaterialTheme.colorScheme.onSecondary,
+                                            unselectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+                                        )
+                                    }
                                 }
                             }
                         }
