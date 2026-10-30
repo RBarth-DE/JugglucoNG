@@ -295,13 +295,8 @@ static NightUploadRange *getRecentNightUploadRange(const int sensorid,const bool
 static void rememberRecentNightUpload(const int sensorid,const uint32_t start,const uint32_t end) {
     if(!start || !end)
         return;
-    auto *range=getRecentNightUploadRange(sensorid,true);
-    if(!range)
-        return;
-    if(!range->start || start<range->start)
-        range->start=start;
-    if(end>range->end)
-        range->end=end;
+    if(auto *range=getRecentNightUploadRange(sensorid,true))
+        *range={start,end};
     }
 
 static void pruneRecentNightUpload(const int sensorid,const uint32_t tim) {
