@@ -42,7 +42,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -97,6 +96,8 @@ import tk.glucodata.ui.components.AppTopBar
 import tk.glucodata.ui.components.CardPosition
 import tk.glucodata.ui.components.MasterSwitchCard
 import tk.glucodata.ui.components.SettingsSwitchItem
+import tk.glucodata.ui.components.SettingsChoice
+import tk.glucodata.ui.components.SettingsControlsCard
 import tk.glucodata.ui.components.cardShape
 import tk.glucodata.ui.util.ConnectedButtonGroup
 
@@ -713,59 +714,25 @@ fun NightscoutSettingsScreen(navController: NavController) {
                     var pollMinutes by remember {
                         mutableStateOf(NightscoutFollowerRegistry.loadPollMinutes(context))
                     }
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        shape = cardShape(CardPosition.SINGLE),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                    ) {
-                        Column(
-                            // The 48dp help target already gives the heading its top inset.
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            NightscoutCardHeading(stringResource(R.string.nightscout_follow_interval_title)) {
-                                help = NightscoutHelp.POLLING
-                            }
-                            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                val options = NightscoutFollowerPollPolicy.CHOICES_MINUTES
-                                val labels = options.associateWith {
-                                    stringResource(R.string.minutes_short_format, it)
-                                }
-                                val textMeasurer = rememberTextMeasurer()
-                                val labelStyle = MaterialTheme.typography.labelLarge
-                                val density = LocalDensity.current
-                                val widestLabel = with(density) {
-                                    labels.values.maxOf {
-                                        textMeasurer.measure(it, style = labelStyle).size.width
-                                    }.toDp()
-                                }
-                                // Keep equal columns, reflowing before translated or enlarged
-                                // labels need to shrink. Each choice has 24dp of breathing room.
-                                val columns = listOf(3, 2, 1).first {
-                                    (widestLabel + 24.dp) * it +
-                                        ButtonGroupDefaults.ConnectedSpaceBetween * (it - 1) <= maxWidth || it == 1
-                                }
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    options.chunked(columns).forEach { row ->
-                                        ConnectedButtonGroup(
-                                            options = row,
-                                            selectedOption = pollMinutes,
-                                            onOptionSelected = { minutes ->
-                                                pollMinutes = minutes
-                                                NightscoutFollowerRegistry.savePollMinutes(context, minutes)
-                                            },
-                                            label = {},
-                                            labelText = { labels.getValue(it) },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            itemHeight = 48.dp,
-                                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
-                                            selectedContentColor = MaterialTheme.colorScheme.onSecondary,
-                                            unselectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
-                                        )
-                                    }
+                    SettingsControlsCard {
+                        SettingsChoice(
+                            title = stringResource(R.string.nightscout_follow_interval_title),
+                            options = NightscoutFollowerPollPolicy.CHOICES_MINUTES,
+                            labels = NightscoutFollowerPollPolicy.CHOICES_MINUTES.map {
+                                stringResource(R.string.minutes_short_format, it)
+                            },
+                            selectedOption = pollMinutes,
+                            onOptionSelected = { minutes ->
+                                pollMinutes = minutes
+                                NightscoutFollowerRegistry.savePollMinutes(context, minutes)
+                            },
+                            maxItemsPerRow = 3,
+                            titleTrailingContent = {
+                                NightscoutHelpButton(stringResource(R.string.nightscout_follow_interval_title)) {
+                                    help = NightscoutHelp.POLLING
                                 }
                             }
-                        }
+                        )
                     }
                 }
             }
@@ -1031,13 +998,5 @@ private fun NightscoutHelpButton(topic: String, onClick: () -> Unit) {
             modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
-    }
-}
-
-@Composable
-private fun NightscoutCardHeading(title: String, modifier: Modifier = Modifier, onHelp: () -> Unit) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-        NightscoutHelpButton(title, onHelp)
     }
 }
