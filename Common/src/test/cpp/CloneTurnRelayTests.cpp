@@ -16,6 +16,8 @@
 #include <cassert>
 #include <iostream>
 #include <netdb.h>
+#include <poll.h>
+#include <unistd.h>
 #ifdef TEST_TURN_STREAM
 #include "net/ICE/TurnStreamRelay.hpp"
 #include "TurnTestProxy.hpp"
@@ -58,12 +60,51 @@ extern "C" ssize_t clone_turn_test_sendto(int socket, const void *data, size_t s
         const bool blocked = blockAllPeerUdp ?
             (from == first || from == second) && std::find(controlPorts.begin(),controlPorts.end(),to)==controlPorts.end() :
             ((from == first && to == second) || (from == second && to == first));
-        if (first && second && blocked) {
+        // libjuice interrupts its worker's poll with an empty datagram sent
+        // to its own loopback socket. Dropping that notification can strand
+        // newly resolved TURN entries, and later hang juice_destroy's join.
+        const bool loopback=destination->sa_family==AF_INET?
+            reinterpret_cast<const sockaddr_in *>(destination)->sin_addr.s_addr==htonl(INADDR_LOOPBACK):
+            destination->sa_family==AF_INET6&&IN6_IS_ADDR_LOOPBACK(
+                &reinterpret_cast<const sockaddr_in6 *>(destination)->sin6_addr);
+        const bool internalWake=size==0&&from==to&&loopback;
+        if (first && second && blocked && !internalWake) {
             ++droppedDirectPackets;
             return size;
         }
     }
     return sendto(socket, data, size, flags, destination, destinationSize);
+}
+
+static void verifyBlockedUdpWakeups() {
+    int sockets[2];
+    sockaddr_in addresses[2]{};
+    for(size_t i=0;i<2;++i) {
+        sockets[i]=socket(AF_INET,SOCK_DGRAM,0);assert(sockets[i]>=0);
+        addresses[i].sin_family=AF_INET;
+        addresses[i].sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+        assert(bind(sockets[i],reinterpret_cast<sockaddr *>(&addresses[i]),sizeof(addresses[i]))==0);
+        socklen_t length=sizeof(addresses[i]);
+        assert(getsockname(sockets[i],reinterpret_cast<sockaddr *>(&addresses[i]),&length)==0);
+        peerPorts[i]=ntohs(addresses[i].sin_port);
+    }
+    const auto send=[&](int target,size_t size) {
+        return clone_turn_test_sendto(sockets[0],"x",size,0,
+            reinterpret_cast<sockaddr *>(&addresses[target]),sizeof(addresses[target]));
+    };
+    assert(send(0,0)==0);
+    pollfd wake{.fd=sockets[0],.events=POLLIN};
+    assert(poll(&wake,1,500)==1); // worker wake must reach the actual socket
+    char byte;
+    assert(recv(sockets[0],&byte,1,0)==0);
+    assert(send(0,1)==1); // nonempty self-directed packets remain blocked
+    assert(send(1,1)==1); // ordinary peer traffic remains blocked
+    assert(send(1,0)==0); // empty peer-to-peer packets are not internal wakes
+    pollfd blocked[2]{{.fd=sockets[0],.events=POLLIN},{.fd=sockets[1],.events=POLLIN}};
+    assert(poll(blocked,2,50)==0);
+    for(size_t i=0;i<2;++i) {close(sockets[i]);peerPorts[i]=0;}
+    droppedDirectPackets=0;
+    puts("PASS: UDP filter preserves internal wakeups while blocking peer datagrams");
 }
 
 struct Peer {
@@ -102,6 +143,7 @@ int main(int argc, char **argv) {
     const bool live = argc == 5 && strcmp(argv[1], "--live") == 0;
     if (argc != 1 && !rejectAll && !streamTcp && !streamTls && !live)
         return 1;
+    if(blockAllPeerUdp) verifyBlockedUdpWakeups();
     juice_set_log_handler(safeTestLog);
     juice_set_log_level(getenv("CLONE_TURN_TEST_LOG") ? JUICE_LOG_LEVEL_DEBUG : JUICE_LOG_LEVEL_NONE);
     auto relays = std::to_array(bundledTurnServers);
