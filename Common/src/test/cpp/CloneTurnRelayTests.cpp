@@ -139,7 +139,9 @@ int main(int argc, char **argv) {
     std::vector<std::unique_ptr<TurnStreamRelay>> streams;
     if(streamTcp || streamTls) {
         for(auto &relay:relays) {
-            auto proxy=std::make_unique<TurnTestProxy>(relay.port,streamTls);
+            // Force buffered TLS plaintext and fragmented TURN frames instead
+            // of depending on the host's TLS-record / socket-read scheduling.
+            auto proxy=std::make_unique<TurnTestProxy>(relay.port,streamTls,7);
             proxies.push_back(std::move(proxy));
         }
     }

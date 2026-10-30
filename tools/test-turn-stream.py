@@ -64,6 +64,12 @@ def main():
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert, key)
+        proxy_test = directory / 'proxy-test'
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-pthread', '-Wall', '-Werror',
+                        '-I' + str(CPP), str(ROOT / 'Common/src/test/cpp/TurnTestProxyTests.cpp'),
+                        *flags, '-o', str(proxy_test)], check=True)
+        subprocess.run([str(proxy_test)], check=True, timeout=10,
+                       env=dict(os.environ, TURN_TEST_CERT=str(cert), TURN_TEST_KEY=str(key)))
         for transport, trusted, hostname, mode in (
                 ('tcp', False, '127.0.0.1', 'echo'),
                 ('tls', True, 'localhost', 'echo'),
