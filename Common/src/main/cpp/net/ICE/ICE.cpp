@@ -99,7 +99,8 @@ ICEConfigSnapshot currentICEConfig() {
 
 void updateICEConfig(std::string rendezvousHost, uint16_t rendezvousPort,
                      bool useTurnForStun, bool verifyRendezvousCertificate,
-                     bool useLocalDiscovery, bool preferIPv4) {
+                     bool useLocalDiscovery, bool preferIPv4,
+                     bool allowFallbackServers) {
     const std::lock_guard<std::mutex> lock(ice_config_mutex);
     ice_config.rendezvousHost=std::move(rendezvousHost);
     ice_config.rendezvousPort=rendezvousPort?rendezvousPort:6789;
@@ -107,6 +108,7 @@ void updateICEConfig(std::string rendezvousHost, uint16_t rendezvousPort,
     ice_config.verifyRendezvousCertificate=verifyRendezvousCertificate;
     ice_config.useLocalDiscovery=useLocalDiscovery;
     ice_config.preferIPv4=preferIPv4;
+    ice_config.allowFallbackServers=allowFallbackServers;
     }
 
 std::vector<RendezvousEndpoint> resolveRendezvousEndpoints(std::string_view label) {
@@ -114,10 +116,14 @@ std::vector<RendezvousEndpoint> resolveRendezvousEndpoints(std::string_view labe
     // Without a custom server the configured port still applies to the
     // public one, as before failover existed.
     const uint16_t publicPort=config.rendezvousHost.empty()?config.rendezvousPort:6789;
+    // A custom server is used alone unless the user allows the public ones
+    // as fallback.
+    const bool usePublic=config.rendezvousHost.empty()||config.allowFallbackServers;
     return buildRendezvousEndpoints(
         {config.rendezvousHost,config.rendezvousPort,
          config.verifyRendezvousCertificate},
-        hostnames,static_cast<size_t>(hostselect(label)),publicPort);
+        usePublic?std::span<const std::string_view>(hostnames):std::span<const std::string_view>(),
+        static_cast<size_t>(hostselect(label)),publicPort);
     }
 
 ICEConnect::ICEConnect(int allindex,const passhost_t &host)
@@ -198,6 +204,7 @@ static bool applyRemoteDescription(int allindex, juice_agent_t *agent,
                   juiceErrorString(result),result);
         return false;
         }
+    con->turnRelayRotation.answered(generation);
     if(auto local=con->currentLocalSignal())
         local->setAcceptedRemoteDescription(description);
     if(fromLocalNetwork) {
@@ -1229,21 +1236,28 @@ juice_agent *createAgent(int allindex) {
             updatedata->NRturnserver=0;
             }
         }
+    const auto networkConfig=currentICEConfig();
+    // A custom relay is used alone unless the user allows the app's relays as
+    // fallback; then it stays in every selection and the backups rotate.
+    const bool useBundled=!has_configured_turn||networkConfig.allowFallbackServers;
     std::vector<TurnRelay> pool;
     if(has_configured_turn)
         appendTurnRelay(pool,{configured_turn_host,configured_turn_username,
                             configured_turn_password,configured_turn_port,
                             TurnRelayTransport::Udp,"custom",""},true);
-    for(int i=0;i<defaultservercount;++i) {
-        const auto &server=default_turn_servers[i];
-        const auto &options=bundledTurnOptions[i];
-        if(!turnTextPresent(server.host)||!hasTurnCredentials(server)) continue;
-        appendTurnRelay(pool,{server.host,server.username,server.password,server.port,
-                            options.transport,options.provider,options.region});
+    if(useBundled) {
+        for(int i=0;i<defaultservercount;++i) {
+            const auto &server=default_turn_servers[i];
+            const auto &options=bundledTurnOptions[i];
+            if(!turnTextPresent(server.host)||!hasTurnCredentials(server)) continue;
+            appendTurnRelay(pool,{server.host,server.username,server.password,server.port,
+                                options.transport,options.provider,options.region});
+            }
+        for(auto &relay:twilioTurnRelays()) appendTurnRelay(pool,std::move(relay));
         }
-    for(auto &relay:twilioTurnRelays()) appendTurnRelay(pool,std::move(relay));
     auto *connection=static_cast<ICEConnect *>(connections[allindex]);
-    auto selected=connection->turnRelayRotation.select(pool,connection->currentAgentGeneration());
+    auto selected=connection->turnRelayRotation.select(pool,connection->currentAgentGeneration(),
+                                                       has_configured_turn);
     for(const auto &relay:selected) {
         LOGGERICE("TURN choice %s:%u transport=%d provider=%s region=%s\n",
                   relay.host.c_str(),relay.port,static_cast<int>(relay.transport),
@@ -1264,7 +1278,6 @@ juice_agent *createAgent(int allindex) {
     turn_servers=servercount?usable_turn_servers.data():nullptr;
     LOGGER("createAgent: %d active TURN relays from %zu configured and bundled choices\n",
            servercount,pool.size());
-    const auto networkConfig=currentICEConfig();
     const bool useConfiguredTurnForStun=
         networkConfig.useTurnForStun&&has_configured_turn;
     if(networkConfig.useTurnForStun&&!has_configured_turn)
@@ -1603,7 +1616,6 @@ bool initAgent(juice_agent *agent,int allindex) {
         }
     LOGGERICE("initAgent %s %d: Before juice_gather_candidates\n",commonLabel.data(),side);
     con->phase=GatherCandidates;
-    con->turnRelayRotation.beginAttempt(generation);
     int ret=juice_gather_candidates(agent);
     if(con->endConnect.load()||!stillworking(allindex))
         return false;

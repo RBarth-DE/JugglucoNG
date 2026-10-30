@@ -70,9 +70,9 @@ int main() {
     // A signaling retry has not failed ICE and keeps the same relay choices.
     chosen = rotation.select(pool, 3);
     assert(chosen[0].host == "custom");
-    rotation.failedAttempt(3); // HTTP-only teardown did not start ICE
+    rotation.failedAttempt(3); // the peer never answered: says nothing about relays
     assert(rotation.select(pool, 4)[0].host == "custom");
-    rotation.beginAttempt(4);
+    rotation.answered(4);
     rotation.failedAttempt(2); // stale callback
     rotation.connected(2); // stale success cannot hide a pending attempt
     rotation.failedAttempt(4);
@@ -82,30 +82,57 @@ int main() {
     for (uint64_t generation = 6; generation < 6 + pool.size(); ++generation) {
         chosen = rotation.select(pool, generation);
         attempted.insert(chosen[0].host);
-        rotation.beginAttempt(generation);
+        rotation.answered(generation);
         rotation.failedAttempt(generation);
     }
     assert(attempted.size() == pool.size());
-    // Changed credentials / settings reset stale ranking without retaining a
-    // pointer into a replaced configuration or exposing credentials in logs.
-    pool[0].password = "replacement";
-    assert(rotation.select(pool, 20)[0].host == "custom");
+    // Changed credentials (a token refresh) keep the relay that was up next
+    // instead of restarting the walk, without retaining a pointer into the
+    // replaced configuration.
+    const auto head = rotation.select(pool, 19)[0].host;
+    for (auto &entry : pool) entry.password = "replacement";
+    assert(rotation.select(pool, 20)[0].host == head);
+    pool.insert(pool.begin() + 1, relay("joined-later"));
+    assert(rotation.select(pool, 20)[0].host == head);
+    pool.erase(pool.begin() + 1);
     pool.resize(1);
     assert(rotation.select(pool, 21).size() == 1);
-    rotation.beginAttempt(21);
+    rotation.answered(21);
     rotation.failedAttempt(21);
     assert(rotation.select(pool, 22).size() == 1);
     pool.push_back(relay("next"));
     assert(rotation.select(pool,23)[0].host=="custom");
-    rotation.beginAttempt(23);
+    rotation.answered(23);
     rotation.connected(23);
     rotation.failedAttempt(23); // successful disconnect retains its choices
     assert(rotation.select(pool,24)[0].host=="custom");
-    rotation.beginAttempt(24);
+    rotation.answered(24);
     rotation.failedAttempt(24); // abandoned / failed initialization rotates
     assert(rotation.select(pool,25)[0].host=="next");
     rotation.failedAttempt(25); // signaling-only replacement must not rotate
     assert(rotation.select(pool,26)[0].host=="next");
+    {
+        // The user's own relay stays in every selection when backups are
+        // allowed; the second slot walks every backup in order.
+        TurnRelayRotation pinned;
+        std::vector<TurnRelay> backups{relay("own"), relay("b1"),
+            relay("b2", TurnRelayTransport::Tls), relay("b3", TurnRelayTransport::Tcp)};
+        std::vector<std::string> second;
+        for (uint64_t generation = 1; generation <= 6; ++generation) {
+            const auto selected = pinned.select(backups, generation, true);
+            assert(selected.size() == 2 && selected[0].host == "own");
+            second.push_back(selected[1].host);
+            pinned.answered(generation);
+            pinned.failedAttempt(generation);
+        }
+        assert((second == std::vector<std::string>{"b1", "b2", "b3", "b1", "b2", "b3"}));
+        // An absent peer does not move the walk.
+        const auto before = pinned.select(backups, 7, true)[1].host;
+        pinned.failedAttempt(7);
+        assert(pinned.select(backups, 8, true)[1].host == before);
+        // Alone, the own relay is the whole selection.
+        assert(pinned.select({relay("own")}, 9, true).size() == 1);
+    }
     pool.clear();
     appendTurnRelay(pool, relay("a"));
     appendTurnRelay(pool, relay("a"));
@@ -126,7 +153,7 @@ int main() {
     for(uint64_t generation=1;generation<=pool.size();++generation) {
         const auto selected=accounts.select(pool,generation);
         attemptedAccounts.emplace(selected.front().username,selected.front().password);
-        accounts.beginAttempt(generation);
+        accounts.answered(generation);
         accounts.failedAttempt(generation);
     }
     assert(attemptedAccounts.contains({"backup-user","password"}));
