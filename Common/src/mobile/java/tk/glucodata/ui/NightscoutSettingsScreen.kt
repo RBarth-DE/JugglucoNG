@@ -719,7 +719,8 @@ fun NightscoutSettingsScreen(navController: NavController) {
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                            // The 48dp help target already gives the heading its top inset.
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             NightscoutCardHeading(stringResource(R.string.nightscout_follow_interval_title)) {
