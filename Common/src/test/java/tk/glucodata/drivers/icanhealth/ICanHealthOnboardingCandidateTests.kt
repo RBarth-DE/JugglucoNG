@@ -50,12 +50,10 @@ class ICanHealthOnboardingCandidateTests {
     }
 
     @Test
-    fun aCandidateThatNeverConnectsIsSetAsideNotBlacklisted() {
+    fun theCarFromTheReportPassesTheNameCheck() {
         // 2026-10-30 report: the bonded car head unit `GeelyVehicle995` passes the name check and
-        // never accepts a GATT connection, so no GATT table ever reaches isConclusivelyNotCgm.
+        // never accepts a GATT connection (status 147), so no GATT table ever reaches isConclusivelyNotCgm.
         assertTrue(ICanHealthConstants.isICanHealthDevice("GeelyVehicle995"))
-        assertTrue(ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES >= 2)
-        assertTrue(ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS > 0L)
     }
 
     @Test

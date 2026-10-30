@@ -271,7 +271,10 @@ class ICanHealthBleManager(
     // registry supplied. Only a guess like that may be dropped for not being a CGM.
     @Volatile private var onboardingScanPickedAddress: String? = null
     private val nonCgmCandidateStrikes = ConcurrentHashMap<String, Int>()
-    private val unreachableCandidateStrikes = ConcurrentHashMap<String, Int>()
+    private val unreachableCandidates = ICanHealthUnreachableCandidates()
+    // The GATT whose current attempt reached STATE_CONNECTED. Tied to the instance, because a
+    // dropped candidate is closed without a disconnect callback and must not vouch for the next.
+    @Volatile private var connectedGatt: BluetoothGatt? = null
 
     private var provisionalSensorIdForAdoption: String? =
         serial.takeIf { ICanHealthConstants.isProvisionalSensorId(it) }
@@ -902,6 +905,7 @@ class ICanHealthBleManager(
         // Always reset the rejected-address set on (re)onboarding, so a transient misread
         // or a retried onboarding attempt is not permanently blacklisted for this SN.
         rejectedOnboardingAddresses.clear()
+        unreachableCandidates.clear()
         onboardingDeviceSn = normalized
     }
 
@@ -1179,7 +1183,7 @@ class ICanHealthBleManager(
     override fun matchDeviceName(deviceName: String?, address: String?): Boolean {
         val trimmedName = deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val candidateAddress = address?.trim()?.uppercase(Locale.US)
-        if (candidateAddress != null && candidateAddress in rejectedOnboardingAddresses) {
+        if (isExcludedOnboardingCandidate(candidateAddress)) {
             return false
         }
         val knownAddress = mActiveDeviceAddress?.takeIf { it.isNotBlank() }
@@ -1200,6 +1204,12 @@ class ICanHealthBleManager(
             matchesUnaddressedName(trimmedName),
         )
     }
+
+    private fun isExcludedOnboardingCandidate(address: String?): Boolean =
+        address != null && (
+            address in rejectedOnboardingAddresses ||
+                unreachableCandidates.isSetAside(address, SystemClock.elapsedRealtime())
+            )
 
     private fun matchesUnaddressedName(trimmedName: String): Boolean {
         val expectedDisplayName = mygetDeviceName().trim().takeIf { it.isNotEmpty() }
@@ -1227,7 +1237,7 @@ class ICanHealthBleManager(
 
     override fun matchScanResult(result: ScanResult): Boolean {
         val address = result.device?.address?.trim()?.uppercase(Locale.US)
-        if (address != null && address in rejectedOnboardingAddresses) {
+        if (isExcludedOnboardingCandidate(address)) {
             return false
         }
         val knownAddress = mActiveDeviceAddress?.takeIf { it.isNotBlank() }
@@ -1309,6 +1319,7 @@ class ICanHealthBleManager(
                 resetConnectionAttemptState()
                 clearGattTransportState(clearReconnect = false, clearServices = true)
                 mBluetoothGatt = gatt
+                connectedGatt = gatt
                 connectTime = System.currentTimeMillis()
                 lastConnectionStartedAtMs = connectTime
                 receivedGlucoseThisConnection = false
@@ -1341,7 +1352,8 @@ class ICanHealthBleManager(
 
             BluetoothProfile.STATE_DISCONNECTED -> {
                 Log.i(TAG, "Disconnected (status=$status)")
-                val reachedConnected = lastConnectionStartedAtMs != 0L
+                val reachedConnected = connectedGatt === gatt
+                connectedGatt = null
                 if (historyBackfillRequested || awaitingFreshStatusForHistoryBackfill) {
                     Log.w(
                         TAG,
@@ -1718,24 +1730,15 @@ class ICanHealthBleManager(
         if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
             return false
         }
-        if (reachedConnected) {
-            unreachableCandidateStrikes.remove(address)
-            return false
-        }
-        val strikes = (unreachableCandidateStrikes[address] ?: 0) + 1
-        if (strikes < ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES) {
-            unreachableCandidateStrikes[address] = strikes
-            Log.w(TAG, "iCan candidate address=$address did not connect ($strikes/${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES})")
-            return false
-        }
-        unreachableCandidateStrikes.remove(address)
-        Log.w(TAG, "Setting aside iCan candidate address=$address: no connection in $strikes attempts")
-        dropOnboardingCandidate(address)
-        handler.postDelayed({
-            if (rejectedOnboardingAddresses.remove(address)) {
-                Log.i(TAG, "iCan candidate address=$address eligible again")
+        if (!unreachableCandidates.attemptEnded(address, reachedConnected, SystemClock.elapsedRealtime())) {
+            if (!reachedConnected) {
+                Log.w(TAG, "iCan candidate address=$address did not connect (${unreachableCandidates.strikes(address)}/${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES})")
             }
-        }, ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS)
+            return false
+        }
+        Log.w(TAG, "Setting aside iCan candidate address=$address for ${ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS / 60_000L} min: no connection in ${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES} attempts")
+        // Not a permanent rejection: the cooldown lives in unreachableCandidates only.
+        dropOnboardingCandidate(null)
         return true
     }
 
@@ -1753,6 +1756,7 @@ class ICanHealthBleManager(
                 ICanHealthConstants.matchesOnboardingIdentity(expectedOnboardingSn, resolvedSerial)
         if (identityMatches) {
             rejectedOnboardingAddresses.clear()
+            unreachableCandidates.clear()
             return false
         }
 
