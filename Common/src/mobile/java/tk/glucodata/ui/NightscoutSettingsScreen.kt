@@ -759,6 +759,9 @@ fun NightscoutSettingsScreen(navController: NavController) {
                             subtitle = stringResource(R.string.nightscout_send_amounts_desc),
                             checked = followerSendTreatments,
                             onCheckedChange = {
+                                // The pass sends to the stored server, so what is on screen has
+                                // to be stored first, as leaving the screen would.
+                                persistSettings(connectFollower = isActive)
                                 followerSendTreatments = it
                                 NightscoutFollowerRegistry.saveSendTreatments(context, it)
                                 if (it) JournalTreatmentUploadAccess.sendAsFollower()
@@ -773,6 +776,7 @@ fun NightscoutSettingsScreen(navController: NavController) {
                             subtitle = stringResource(R.string.nightscout_send_long_insulin_desc),
                             checked = sendLongInsulin,
                             onCheckedChange = {
+                                persistSettings(connectFollower = isActive)
                                 sendLongInsulin = it
                                 JournalTreatmentUploader.setSendLongInsulin(it)
                                 if (it) JournalTreatmentUploadAccess.sendAsFollower()
