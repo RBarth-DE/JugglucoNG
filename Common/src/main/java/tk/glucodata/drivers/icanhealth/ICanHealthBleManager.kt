@@ -271,6 +271,7 @@ class ICanHealthBleManager(
     // registry supplied. Only a guess like that may be dropped for not being a CGM.
     @Volatile private var onboardingScanPickedAddress: String? = null
     private val nonCgmCandidateStrikes = ConcurrentHashMap<String, Int>()
+    private val unreachableCandidateStrikes = ConcurrentHashMap<String, Int>()
 
     private var provisionalSensorIdForAdoption: String? =
         serial.takeIf { ICanHealthConstants.isProvisionalSensorId(it) }
@@ -1340,6 +1341,7 @@ class ICanHealthBleManager(
 
             BluetoothProfile.STATE_DISCONNECTED -> {
                 Log.i(TAG, "Disconnected (status=$status)")
+                val reachedConnected = lastConnectionStartedAtMs != 0L
                 if (historyBackfillRequested || awaitingFreshStatusForHistoryBackfill) {
                     Log.w(
                         TAG,
@@ -1392,7 +1394,7 @@ class ICanHealthBleManager(
                 }
                 mBluetoothGatt = null
 
-                if (!stop && !pausedByUser) {
+                if (!stop && !pausedByUser && !setAsideUnreachableOnboardingCandidate(gatt, reachedConnected)) {
                     scheduleReconnect(reconnectPlan)
                 }
                 UiRefreshBus.requestStatusRefresh()
@@ -1697,6 +1699,43 @@ class ICanHealthBleManager(
         nonCgmCandidateStrikes.remove(address)
         Log.w(TAG, "Rejected iCan candidate address=$address: no CGM service on ${services.size} services")
         dropOnboardingCandidate(address)
+        return true
+    }
+
+    /**
+     * Onboarding found this peripheral by name and it never accepted a GATT connection, so the
+     * non-CGM check above never gets a GATT table to judge. A car head unit (`GeelyVehicle995`,
+     * whose name passes the loose iCan name check) timed out with status 147 every ~40 s for
+     * hours while the real sensor was never considered. After
+     * [ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES] such attempts in a row the address
+     * is set aside for [ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS] and scanning resumes.
+     */
+    private fun setAsideUnreachableOnboardingCandidate(gatt: BluetoothGatt, reachedConnected: Boolean): Boolean {
+        if (!isAwaitingOnboardingIdentity()) {
+            return false
+        }
+        val address = gatt.device?.address?.trim()?.uppercase(Locale.US) ?: return false
+        if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
+            return false
+        }
+        if (reachedConnected) {
+            unreachableCandidateStrikes.remove(address)
+            return false
+        }
+        val strikes = (unreachableCandidateStrikes[address] ?: 0) + 1
+        if (strikes < ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES) {
+            unreachableCandidateStrikes[address] = strikes
+            Log.w(TAG, "iCan candidate address=$address did not connect ($strikes/${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES})")
+            return false
+        }
+        unreachableCandidateStrikes.remove(address)
+        Log.w(TAG, "Setting aside iCan candidate address=$address: no connection in $strikes attempts")
+        dropOnboardingCandidate(address)
+        handler.postDelayed({
+            if (rejectedOnboardingAddresses.remove(address)) {
+                Log.i(TAG, "iCan candidate address=$address eligible again")
+            }
+        }, ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS)
         return true
     }
 
