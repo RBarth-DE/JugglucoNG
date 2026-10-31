@@ -766,9 +766,9 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
         // A managed main sensor's native mirror may only now exist (first reading after
         // selection). Native current must follow it for the web server and watch value.
         try {
-            ManagedCurrentSensor.syncNativeCurrent(SerialNumber);
+            CurrentSensorSelection.syncNativeToManaged(SerialNumber);
         } catch (Throwable t) {
-            Log.stack(LOG_ID, "syncNativeCurrent", t);
+            Log.stack(LOG_ID, "syncNativeToManaged", t);
         }
 
         // History/replay rows are already persisted before this method. They must not

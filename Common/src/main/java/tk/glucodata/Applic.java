@@ -1011,7 +1011,7 @@ public class Applic extends Application implements androidx.work.Configuration.P
                         currentSensor = "";
                     }
                 }
-                tk.glucodata.ManagedCurrentSensor.syncNativeCurrent(
+                tk.glucodata.CurrentSensorSelection.syncNativeToManaged(
                         tk.glucodata.SensorIdentity.resolveMainSensor());
                 String[] active = Natives.activeSensors();
                 if ((currentSensor == null || currentSensor.isEmpty())
