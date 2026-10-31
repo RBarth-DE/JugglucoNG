@@ -135,6 +135,14 @@ private BluetoothGattCharacteristic SatelliteRxChar;
 private BluetoothGattCharacteristic SatelliteTxChar;
 private SatelliteMeterSession satelliteSession;
 private boolean satelliteMode=false;
+// When the last Satellite session ended, whatever its outcome; paces the reconnect after it.
+private long satelliteSessionEndedAt=0L;
+private java.util.concurrent.ScheduledFuture<?> pacedReconnect;
+private void cancelPacedReconnect() {
+    final var pending=pacedReconnect;
+    pacedReconnect=null;
+    if(pending!=null) pending.cancel(false);
+}
 private BluetoothGattCharacteristic VerioWriteChar;
 private BluetoothGattCharacteristic VerioNotifyChar;
 private final VerioSession verioSession=new VerioSession();
@@ -264,6 +272,8 @@ private void beginSatelliteSession(BluetoothGatt gatt) {
     if(pin==null) {
         Log.e(LOG_ID,"Satellite meter code is missing or invalid");
         Applic.argToaster(app, R.string.satellite_meter_code_missing, android.widget.Toast.LENGTH_LONG);
+        // Not every 30 s until a code is entered; saving one retries at once.
+        satelliteSessionEndedAt=System.currentTimeMillis();
         return;
     }
     satelliteSession=new SatelliteMeterSession(pin,System.currentTimeMillis());
@@ -326,6 +336,7 @@ private synchronized void processSatelliteResponse(BluetoothGatt gatt, byte[] va
     if(update.getComplete()) {
         persistSatelliteReadings(update.getReadings());
         satelliteSession=null;
+        satelliteSessionEndedAt=System.currentTimeMillis();
         return;
     }
     final byte[] command=update.getCommand();
@@ -478,6 +489,8 @@ boolean connected=false;
          // its job; go back to the battery-friendly whitelist reconnect for whenever
          // this link drops later.
          autoConnect=true;
+         // Connected some other way; the paced connect would close this link when it fires.
+         cancelPacedReconnect();
         if(stop) {
             close();
             return;
@@ -518,7 +531,14 @@ boolean connected=false;
                         }
                   else {
                      if(autoConnect)  {
-                        if(useConnect)
+                        final long wait=satelliteMode?SatelliteMeterProtocol.reconnectDelayMillis(satelliteSessionEndedAt,tim):0L;
+                        if(wait>0L) {
+                            if(doLog) Log.i(LOG_ID,meterIndex+" Satellite synced, reconnect in "+wait/1000+"s");
+                            close();
+                            cancelPacedReconnect();
+                            pacedReconnect=Applic.scheduler.schedule(getConnectDevice(),wait,TimeUnit.MILLISECONDS);
+                            }
+                        else if(useConnect)
                             bluetoothGatt.connect();
                         }
                     else {
@@ -736,6 +756,8 @@ private void setCareSenseTime(BluetoothGatt bluetoothGatt) {
         return () -> {
              close();
             if(doLog) {Log.i(LOG_ID,"getConnectDevice Runnable "+ meterIndex);};
+            // A delayed connect can outlive removal of the meter.
+            if(stop) return;
             if(!BluetoothGlucoseMeter.bluetoothIsEnabled()) {
                 Log.e(LOG_ID, "!bluetoothIsEnabled() ");
                 return ;
@@ -817,7 +839,10 @@ public void disconnect() {
 void retrySatelliteSession() {
     if(satelliteMode) {
         satelliteSession=null;
-        disconnect();
+        satelliteSessionEndedAt=0L;
+        cancelPacedReconnect();
+        if(mBluetoothGatt!=null) disconnect();
+        else connectActiveDevice(0L);
     }
 }
  public boolean connectActiveDevice(long delayMillis) {

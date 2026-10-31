@@ -102,6 +102,20 @@ class SatelliteMeterProtocolTests {
         assertEquals("Satellite record timestamp is in the future", rejected.error)
     }
 
+    @Test
+    fun pacesTheReconnectAfterASessionInsteadOfRedialingAtOnce() {
+        val interval = SatelliteMeterProtocol.RESYNC_INTERVAL_MS
+        val ended = 1_800_000_000_000L
+        // No session yet, or a retry that cleared it: connect straight away.
+        assertEquals(0L, SatelliteMeterProtocol.reconnectDelayMillis(0L, ended))
+        // The idle drop ~30 s after a session waits out the rest of the interval.
+        assertEquals(interval - 30_000L, SatelliteMeterProtocol.reconnectDelayMillis(ended, ended + 30_000L))
+        assertEquals(0L, SatelliteMeterProtocol.reconnectDelayMillis(ended, ended + interval))
+        assertEquals(0L, SatelliteMeterProtocol.reconnectDelayMillis(ended, ended + 2 * interval))
+        // A clock set backwards waits one interval, not until the old timestamp comes round again.
+        assertEquals(interval, SatelliteMeterProtocol.reconnectDelayMillis(ended, ended - 3_600_000L))
+    }
+
     private fun bytes(value: String) = value.toByteArray(StandardCharsets.US_ASCII)
     private fun text(value: ByteArray?) = value?.toString(StandardCharsets.US_ASCII)
 }
