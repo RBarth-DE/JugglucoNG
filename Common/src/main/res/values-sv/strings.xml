@@ -1910,8 +1910,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="mirror_default_hybrid_label">Hybridklon</string>
     <string name="mirror_clone_master_desc">Aktivera alla sparade Clone-anslutningar</string>
     <string name="clone_history_recovery">Återställ historik</string>
-    <string name="clone_history_direction_send">Skicka till mottagaren</string>
-    <string name="clone_history_direction_pull">Återställ från mottagaren</string>
+    <string name="clone_history_direction_send">Skicka</string>
+    <string name="clone_history_direction_pull">Återställ</string>
     <string name="clone_history_pull_intro">Kopiera sparad historik från denna Clone-mottagare till denna telefon.</string>
     <string name="clone_history_pull_missing_desc">Lägg till saknade poster på denna telefon. Befintlig historik behålls.</string>
     <string name="clone_history_pull_full_desc">Ersätt den valda historiken på denna telefon med en kopia från mottagaren.</string>
@@ -1937,6 +1937,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_history_full_confirm_title">Ersätta mottagarens historik?</string>
     <string name="clone_history_full_confirm_message">Mottagarens glukoshistorik och valda valfria data raderas innan en fullständig kopia skickas. Detta går inte att ångra.</string>
     <string name="clone_history_replace_and_send">Ersätt och skicka</string>
+    <string name="clone_history_replace_and_recover">Ersätt och återställ</string>
     <string name="clone_history_send_action">Starta överföring</string>
     <string name="clone_history_ready">Mottagaren är redo</string>
     <string name="clone_history_preparing">Förbereder historiken…</string>

@@ -1916,8 +1916,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="mirror_default_hybrid_label">Clone hybride</string>
     <string name="mirror_clone_master_desc">Activer toutes les connexions Clone enregistrées</string>
     <string name="clone_history_recovery">Récupération de l’historique</string>
-    <string name="clone_history_direction_send">Envoyer au récepteur</string>
-    <string name="clone_history_direction_pull">Récupérer depuis le récepteur</string>
+    <string name="clone_history_direction_send">Envoyer</string>
+    <string name="clone_history_direction_pull">Récupérer</string>
     <string name="clone_history_pull_intro">Copier l’historique enregistré de ce récepteur Clone vers ce téléphone.</string>
     <string name="clone_history_pull_missing_desc">Ajouter les données manquantes sur ce téléphone. L’historique existant est conservé.</string>
     <string name="clone_history_pull_full_desc">Remplacer l’historique sélectionné sur ce téléphone par une copie du récepteur.</string>
@@ -1943,6 +1943,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_history_full_confirm_title">Remplacer l’historique du récepteur ?</string>
     <string name="clone_history_full_confirm_message">L’historique de glycémie du récepteur et les données facultatives sélectionnées seront effacés avant l’envoi d’une copie complète. Cette action est irréversible.</string>
     <string name="clone_history_replace_and_send">Remplacer et envoyer</string>
+    <string name="clone_history_replace_and_recover">Remplacer et récupérer</string>
     <string name="clone_history_send_action">Démarrer le transfert</string>
     <string name="clone_history_ready">Récepteur prêt</string>
     <string name="clone_history_preparing">Préparation de l’historique…</string>

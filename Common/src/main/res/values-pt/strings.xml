@@ -1911,8 +1911,8 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="mirror_default_hybrid_label">Clone híbrido</string>
     <string name="mirror_clone_master_desc">Ativar todas as conexões Clone guardadas</string>
     <string name="clone_history_recovery">Recuperação do histórico</string>
-    <string name="clone_history_direction_send">Enviar para o recetor</string>
-    <string name="clone_history_direction_pull">Recuperar do recetor</string>
+    <string name="clone_history_direction_send">Enviar</string>
+    <string name="clone_history_direction_pull">Recuperar</string>
     <string name="clone_history_pull_intro">Copiar o histórico guardado deste recetor Clone para este telefone.</string>
     <string name="clone_history_pull_missing_desc">Adicionar os dados em falta neste telefone. O histórico existente é mantido.</string>
     <string name="clone_history_pull_full_desc">Substituir o histórico selecionado neste telefone por uma cópia do recetor.</string>
@@ -1938,6 +1938,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="clone_history_full_confirm_title">Substituir o histórico do recetor?</string>
     <string name="clone_history_full_confirm_message">O histórico de glicose do recetor e os dados opcionais selecionados serão apagados antes do envio de uma cópia completa. Não é possível anular.</string>
     <string name="clone_history_replace_and_send">Substituir e enviar</string>
+    <string name="clone_history_replace_and_recover">Substituir e recuperar</string>
     <string name="clone_history_send_action">Iniciar transferência</string>
     <string name="clone_history_ready">Recetor pronto</string>
     <string name="clone_history_preparing">A preparar o histórico…</string>

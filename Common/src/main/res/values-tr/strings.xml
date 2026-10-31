@@ -1938,8 +1938,8 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="mirror_default_hybrid_label">Hibrit klon</string>
     <string name="mirror_clone_master_desc">Kayıtlı tüm Clone bağlantılarını etkinleştir</string>
     <string name="clone_history_recovery">Geçmişi kurtar</string>
-    <string name="clone_history_direction_send">Alıcıya gönder</string>
-    <string name="clone_history_direction_pull">Alıcıdan kurtar</string>
+    <string name="clone_history_direction_send">Gönder</string>
+    <string name="clone_history_direction_pull">Kurtar</string>
     <string name="clone_history_pull_intro">Bu Clone alıcısındaki kayıtlı geçmişi bu telefona kopyalayın.</string>
     <string name="clone_history_pull_missing_desc">Bu telefona eksik kayıtları ekleyin. Mevcut geçmiş korunur.</string>
     <string name="clone_history_pull_full_desc">Bu telefondaki seçili geçmişi alıcıdan alınan bir kopyayla değiştirin.</string>
@@ -1965,6 +1965,7 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="clone_history_full_confirm_title">Alıcının geçmişi değiştirilsin mi?</string>
     <string name="clone_history_full_confirm_message">Tam bir kopya gönderilmeden önce alıcının glikoz geçmişi ve seçilen isteğe bağlı veriler silinir. Bu işlem geri alınamaz.</string>
     <string name="clone_history_replace_and_send">Değiştir ve gönder</string>
+    <string name="clone_history_replace_and_recover">Değiştir ve kurtar</string>
     <string name="clone_history_send_action">Aktarımı başlat</string>
     <string name="clone_history_ready">Alıcı hazır</string>
     <string name="clone_history_preparing">Geçmiş hazırlanıyor…</string>
