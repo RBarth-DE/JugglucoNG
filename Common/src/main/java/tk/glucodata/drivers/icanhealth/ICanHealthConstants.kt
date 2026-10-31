@@ -782,7 +782,7 @@ object ICanHealthConstants {
      * A stored address only matches that exact radio address. If the box now advertises under
      * another one (replaced box, address change) the sensor is never found again. Rebind only
      * when the advertised name is exactly this sensor's id and nothing has been received for
-     * [STALE_ADDRESS_REBIND_MS], so an unrelated device can never take the slot.
+     * [STALE_ADDRESS_REBIND_MS]. This selects a candidate only; DIS must verify its identity.
      */
     @JvmStatic
     fun shouldRebindStaleAddress(
