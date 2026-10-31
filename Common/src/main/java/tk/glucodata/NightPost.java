@@ -76,6 +76,9 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import tk.glucodata.drivers.ManagedSensorUiFamily;
+import tk.glucodata.drivers.medtrum.MedtrumPersistence;
+
 import javax.net.ssl.SSLContext;
 
 
@@ -585,6 +588,16 @@ static public String getSensorStartLabel(String sensorId) {
     return SensorSourceResolver.resolveSourceInfo(sensorId, SensorSourceResolver.SENSOR_KIND_UNKNOWN);
     }
 
+@Keep
+static public long getSensorStartTime(String sensorId, long nativeStartTime, int managedFamilyCode) {
+    if(managedFamilyCode!=ManagedSensorUiFamily.MEDTRUM.getNativeCode())
+        return nativeStartTime;
+    final Context context=Applic.getContext();
+    if(context==null || sensorId==null || !sensorId.equals(MedtrumPersistence.INSTANCE.getSensorId(context)))
+        return 0L;
+    return MedtrumPersistence.INSTANCE.getSensorStartMs(context)/1000L;
+    }
+
 /**
  * Uploads the journal IOB/eIOB/COB as a Nightscout devicestatus when the
  * opt-in setting is on and one is due. Called from the native uploader loop
@@ -950,6 +963,8 @@ public static void  config(MainActivity act, View settingsview) {
     wake.setOnClickListener(v-> Natives.wakeuploader());
     Button help;
     CheckBox treatments=getcheckbox(act,R.string.sendamounts,Natives.getpostTreatments());
+    CheckBox sensorStart=getcheckbox(act,R.string.nightscout_upload_sensor_start,getUploadSensorStart());
+    sensorStart.setOnCheckedChangeListener((buttonView,isChecked)->setUploadSensorStart(isChecked));
     if(!isWearable) {
         help=getbutton(act,R.string.helpname);
         help.setOnClickListener(v-> help(R.string.NightPost,act));
@@ -982,7 +997,7 @@ public static void  config(MainActivity act, View settingsview) {
    if(isWearable) {
       var space1=new Space(act);
       var space2=new Space(act);
-       layout=new Layout(act, (lay, w, h) -> { return new int[] {w,h};}, new View[]{secretlabel},new View[]{visible},new View[]{editsecret},new View[]{urllabel},new View[]{url},new View[]{statusview},new View[]{treatments},new View[]{clear},new View[]{wake},new View[]{space1,activebox,cancel,space2},new View[]{save});
+       layout=new Layout(act, (lay, w, h) -> { return new int[] {w,h};}, new View[]{secretlabel},new View[]{visible},new View[]{editsecret},new View[]{urllabel},new View[]{url},new View[]{statusview},new View[]{treatments,sensorStart},new View[]{clear},new View[]{wake},new View[]{space1,activebox,cancel,space2},new View[]{save});
    }
       else {
     layout=new Layout(act, (lay, w, h) -> {
@@ -996,7 +1011,7 @@ public static void  config(MainActivity act, View settingsview) {
                                 };
 
             lay.setY(MainActivity.systembarTop);
-                        return new int[] {w,h};}, new View[]{urllabel,url},new View[]{secretlabel,editsecret,visible},new View[]{statusview},new View[]{activebox,v3box,clear,wake},new View[]{treatments,help,cancel,save});
+                        return new int[] {w,h};}, new View[]{urllabel,url},new View[]{secretlabel,editsecret,visible},new View[]{statusview},new View[]{activebox,v3box,clear,wake},new View[]{treatments,sensorStart,help,cancel,save});
 
       }
         int laypar;

@@ -62,6 +62,7 @@ struct NightUploadRange {
     uint32_t end{};
     };
 static constexpr int maxRecentNightUploadSensors = 1024;
+static constexpr unsigned medtrumManagedFamilyCode = 8; // ManagedSensorUiFamily.MEDTRUM.nativeCode
 static NightUploadRange recentNightUploads[maxRecentNightUploadSensors]{};
 /*
 void makeuploadurl(JNIEnv *env) {
@@ -562,7 +563,8 @@ static void uploadSensorStarts(const bool useV3) {
         return;
     const static jmethodID enabledmid=env->GetStaticMethodID(nightpostclass,"getUploadSensorStart","()Z");
     const static jmethodID labelmid=env->GetStaticMethodID(nightpostclass,"getSensorStartLabel","(Ljava/lang/String;)Ljava/lang/String;");
-    if(enabledmid==nullptr || labelmid==nullptr) {
+    const static jmethodID starttimemid=env->GetStaticMethodID(nightpostclass,"getSensorStartTime","(Ljava/lang/String;JI)J");
+    if(enabledmid==nullptr || labelmid==nullptr || starttimemid==nullptr) {
         if(env->ExceptionCheck())
             env->ExceptionClear();
         return;
@@ -575,7 +577,7 @@ static void uploadSensorStarts(const bool useV3) {
     if(!enabled)
         return;
     const uint32_t oldest=nu-30*24*60*60;
-    const int last=std::min(sensors->last(),maxRecentNightUploadSensors-1);
+    const int last=sensors->last();
     if(last<0) return;
     if(nextSensorStartIndex<0 || nextSensorStartIndex>last) nextSensorStartIndex=last;
     for(int checked=0,sensorid=nextSensorStartIndex;checked<=last;
@@ -583,7 +585,24 @@ static void uploadSensorStarts(const bool useV3) {
         const SensorGlucoseData *sens=sensors->getSensorData(sensorid);
         if(!sens || !sens->getinfo() || isNightscoutFollowerSensor(sens))
             continue;
-        const uint32_t start=sens->getstarttime();
+        const auto *info=sens->getinfo();
+        const unsigned family=info->managedFamilyCode();
+        uint32_t start=sens->getstarttime();
+        if(family==medtrumManagedFamilyCode) {
+            const std::string sensorId(sens->sensid());
+            jstring jid=env->NewStringUTF(sensorId.c_str());
+            if(!jid) return;
+            const jlong resolved=env->CallStaticLongMethod(
+                nightpostclass,starttimemid,jid,static_cast<jlong>(start),static_cast<jint>(family));
+            env->DeleteLocalRef(jid);
+            if(env->ExceptionCheck()) {
+                env->ExceptionClear();
+                return;
+                }
+            if(resolved<=0)
+                continue;
+            start=static_cast<uint32_t>(resolved);
+            }
         if(!start || start<oldest || start>nu+3600)
             continue;
         const std::string_view serial=sens->showsensorname();
