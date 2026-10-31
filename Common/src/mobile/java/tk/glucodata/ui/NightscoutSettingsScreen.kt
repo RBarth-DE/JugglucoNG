@@ -82,6 +82,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import tk.glucodata.JournalTreatmentUploadAccess
 import tk.glucodata.Natives
 import tk.glucodata.NightPost
 import tk.glucodata.NightscoutTokenGrant
@@ -245,6 +246,9 @@ fun NightscoutSettingsScreen(navController: NavController) {
     var isActive by rememberSaveable { mutableStateOf(initialUploaderActive || followerConfig.enabled) }
     var sendTreatments by rememberSaveable { mutableStateOf(Natives.getpostTreatments()) }
     var sendLongInsulin by rememberSaveable { mutableStateOf(JournalTreatmentUploader.getSendLongInsulin()) }
+    var followerSendTreatments by rememberSaveable {
+        mutableStateOf(NightscoutFollowerRegistry.loadSendTreatments(context))
+    }
     var receiveTreatments by rememberSaveable { mutableStateOf(JournalTreatmentUploader.getReceiveTreatments()) }
     var uploadIob by rememberSaveable { mutableStateOf(NightPost.getUploadIob()) }
     var isV3 by rememberSaveable { mutableStateOf(Natives.getnightscoutV3()) }
@@ -732,6 +736,46 @@ fun NightscoutSettingsScreen(navController: NavController) {
                                     help = NightscoutHelp.POLLING
                                 }
                             }
+                        )
+                    }
+                }
+
+                item("nightscout_follow_send_treatments") {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.nightscout_send_treatments),
+                            subtitle = stringResource(R.string.nightscout_send_amounts_desc),
+                            checked = followerSendTreatments,
+                            onCheckedChange = {
+                                // The pass sends to the stored server, so what is on screen has
+                                // to be stored first, as leaving the screen would.
+                                persistSettings(connectFollower = isActive)
+                                followerSendTreatments = it
+                                NightscoutFollowerRegistry.saveSendTreatments(context, it)
+                                if (it) JournalTreatmentUploadAccess.sendAsFollower()
+                            },
+                            icon = Icons.Default.Medication,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            enabled = isActive,
+                            position = CardPosition.TOP
+                        )
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.nightscout_send_long_insulin),
+                            subtitle = stringResource(R.string.nightscout_send_long_insulin_desc),
+                            checked = sendLongInsulin,
+                            onCheckedChange = {
+                                persistSettings(connectFollower = isActive)
+                                sendLongInsulin = it
+                                JournalTreatmentUploader.setSendLongInsulin(it)
+                                if (it) JournalTreatmentUploadAccess.sendAsFollower()
+                            },
+                            icon = Icons.Default.Medication,
+                            iconTint = MaterialTheme.colorScheme.tertiary,
+                            enabled = isActive && followerSendTreatments,
+                            position = CardPosition.BOTTOM
                         )
                     }
                 }
