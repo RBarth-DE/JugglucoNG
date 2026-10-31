@@ -316,6 +316,28 @@ class ICanHealthAddressRebindTests {
         assertFalse(manager.matchDeviceName(sensor, candidateAddress))
     }
 
+    @Test fun mergedOnboardingPolicyStillSetsAsideThreeFailedAttemptsAndExpires() {
+        restoreWaitingOldAddress()
+        manager.SerialNumber = "ICN-ONBOARDING"
+        set("serialFromDevice", null)
+        set("rawSerialFromDevice", null)
+        manager.setDevice(null)
+        manager.searchforDeviceAddress()
+        assertTrue(manager.matchDeviceName("GeelyVehicle995", candidateAddress))
+        manager.setDevice(BluetoothAdapter.getDefaultAdapter().getRemoteDevice(candidateAddress))
+        repeat(3) { index ->
+            newGatt(manager.mActiveBluetoothDevice)
+            manager.onConnectionStateChange(gatt, 147, BluetoothProfile.STATE_DISCONNECTED)
+            if (index < 2) assertEquals(candidateAddress, manager.mActiveDeviceAddress)
+        }
+        assertNull(manager.mActiveDeviceAddress)
+        assertNull(manager.mActiveBluetoothDevice)
+        assertFalse(manager.matchDeviceName("GeelyVehicle995", candidateAddress))
+        assertTrue((get("rejectedOnboardingAddresses") as Set<*>).isEmpty())
+        ShadowSystemClock.advanceBy(Duration.ofMinutes(11))
+        assertTrue(manager.matchDeviceName("GeelyVehicle995", candidateAddress))
+    }
+
     private fun restoreWaitingOldAddress() {
         (get("handler") as Handler).removeCallbacks(get("rebindTimeoutRunnable") as Runnable)
         set("pendingAddressRebind", null)

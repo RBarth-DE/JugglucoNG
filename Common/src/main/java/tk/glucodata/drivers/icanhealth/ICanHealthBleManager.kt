@@ -1812,34 +1812,6 @@ class ICanHealthBleManager(
     }
 
     /**
-     * Onboarding found this peripheral by name and it never accepted a GATT connection, so the
-     * non-CGM check above never gets a GATT table to judge. A car head unit (`GeelyVehicle995`,
-     * whose name passes the loose iCan name check) timed out with status 147 every ~40 s for
-     * hours while the real sensor was never considered. After
-     * [ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES] such attempts in a row the address
-     * is set aside for [ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS] and scanning resumes.
-     */
-    private fun setAsideUnreachableOnboardingCandidate(gatt: BluetoothGatt, reachedConnected: Boolean): Boolean {
-        if (!isAwaitingOnboardingIdentity()) {
-            return false
-        }
-        val address = gatt.device?.address?.trim()?.uppercase(Locale.US) ?: return false
-        if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
-            return false
-        }
-        if (!unreachableCandidates.attemptEnded(address, reachedConnected, SystemClock.elapsedRealtime())) {
-            if (!reachedConnected) {
-                Log.w(TAG, "iCan candidate address=$address did not connect (${unreachableCandidates.strikes(address)}/${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES})")
-            }
-            return false
-        }
-        Log.w(TAG, "Setting aside iCan candidate address=$address for ${ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS / 60_000L} min: no connection in ${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES} attempts")
-        // Not a permanent rejection: the cooldown lives in unreachableCandidates only.
-        dropOnboardingCandidate(null)
-        return true
-    }
-
-    /**
      * A rebind trusts only the advertised name, which any nearby device can copy. Once the
      * device reports its serial, keep the new address only if it is the saved sensor;
      * otherwise put the old address back before [handleResolvedSerial] rewrites the identity.
@@ -1877,6 +1849,34 @@ class ICanHealthBleManager(
             scheduleReconnect(computeReconnectPlan(System.currentTimeMillis()))
             handler.postDelayed({ if (!stop && !uiPaused) SensorBluetooth.startscan() }, 250L)
         }
+        return true
+    }
+
+    /**
+     * Onboarding found this peripheral by name and it never accepted a GATT connection, so the
+     * non-CGM check above never gets a GATT table to judge. A car head unit (`GeelyVehicle995`,
+     * whose name passes the loose iCan name check) timed out with status 147 every ~40 s for
+     * hours while the real sensor was never considered. After
+     * [ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES] such attempts in a row the address
+     * is set aside for [ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS] and scanning resumes.
+     */
+    private fun setAsideUnreachableOnboardingCandidate(gatt: BluetoothGatt, reachedConnected: Boolean): Boolean {
+        if (!isAwaitingOnboardingIdentity()) {
+            return false
+        }
+        val address = gatt.device?.address?.trim()?.uppercase(Locale.US) ?: return false
+        if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
+            return false
+        }
+        if (!unreachableCandidates.attemptEnded(address, reachedConnected, SystemClock.elapsedRealtime())) {
+            if (!reachedConnected) {
+                Log.w(TAG, "iCan candidate address=$address did not connect (${unreachableCandidates.strikes(address)}/${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES})")
+            }
+            return false
+        }
+        Log.w(TAG, "Setting aside iCan candidate address=$address for ${ICanHealthConstants.UNREACHABLE_CANDIDATE_COOLDOWN_MS / 60_000L} min: no connection in ${ICanHealthConstants.UNREACHABLE_CANDIDATE_REJECT_STRIKES} attempts")
+        // Not a permanent rejection: the cooldown lives in unreachableCandidates only.
+        dropOnboardingCandidate(null)
         return true
     }
 
