@@ -77,6 +77,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import tk.glucodata.drivers.ManagedSensorUiFamily;
+import tk.glucodata.drivers.api.ApiGlucoseSourceIdentityAdapter;
 import tk.glucodata.drivers.medtrum.MedtrumPersistence;
 
 import javax.net.ssl.SSLContext;
@@ -590,6 +591,9 @@ static public String getSensorStartLabel(String sensorId) {
 
 @Keep
 static public long getSensorStartTime(String sensorId, long nativeStartTime, int managedFamilyCode) {
+    if(managedFamilyCode==ManagedSensorUiFamily.GENERIC.getNativeCode() &&
+            ApiGlucoseSourceIdentityAdapter.INSTANCE.resolveCanonicalSensorId(sensorId)!=null)
+        return 0L;
     if(managedFamilyCode!=ManagedSensorUiFamily.MEDTRUM.getNativeCode())
         return nativeStartTime;
     final Context context=Applic.getContext();

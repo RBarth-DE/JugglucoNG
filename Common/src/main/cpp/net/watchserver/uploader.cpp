@@ -589,26 +589,23 @@ static void uploadSensorStarts(const bool useV3) {
         uint32_t start=sens->getstarttime();
         if(!start || start<oldest || start>nu+3600)
             continue;
-        if(family!=0) {
-            const std::string sensorId(sens->sensid());
-            jstring jid=env->NewStringUTF(sensorId.c_str());
-            if(!jid) return;
-            const jlong resolved=env->CallStaticLongMethod(
-                nightpostclass,starttimemid,jid,static_cast<jlong>(start),static_cast<jint>(family));
-            env->DeleteLocalRef(jid);
-            if(env->ExceptionCheck()) {
-                env->ExceptionClear();
-                return;
-                }
-            if(resolved<=0)
-                continue;
-            start=static_cast<uint32_t>(resolved);
-            if(start<oldest || start>nu+3600)
-                continue;
+        const std::string sensorId(sens->sensid());
+        jstring startid=env->NewStringUTF(sensorId.c_str());
+        if(!startid) return;
+        const jlong resolved=env->CallStaticLongMethod(
+            nightpostclass,starttimemid,startid,static_cast<jlong>(start),static_cast<jint>(family));
+        env->DeleteLocalRef(startid);
+        if(env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return;
             }
+        if(resolved<=0)
+            continue;
+        start=static_cast<uint32_t>(resolved);
+        if(start<oldest || start>nu+3600)
+            continue;
         const std::string_view serial=sens->showsensorname();
         const std::string_view sid=sens->sensid();
-        const std::string sensorId(sid);
         jstring jid=env->NewStringUTF(sensorId.c_str());
         if(!jid) return;
         auto jlabel=static_cast<jstring>(env->CallStaticObjectMethod(nightpostclass,labelmid,jid));
