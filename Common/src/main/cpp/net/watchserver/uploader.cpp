@@ -62,7 +62,6 @@ struct NightUploadRange {
     uint32_t end{};
     };
 static constexpr int maxRecentNightUploadSensors = 1024;
-static constexpr unsigned medtrumManagedFamilyCode = 8; // ManagedSensorUiFamily.MEDTRUM.nativeCode
 static NightUploadRange recentNightUploads[maxRecentNightUploadSensors]{};
 /*
 void makeuploadurl(JNIEnv *env) {
@@ -588,7 +587,9 @@ static void uploadSensorStarts(const bool useV3) {
         const auto *info=sens->getinfo();
         const unsigned family=info->managedFamilyCode();
         uint32_t start=sens->getstarttime();
-        if(family==medtrumManagedFamilyCode) {
+        if(!start || start<oldest || start>nu+3600)
+            continue;
+        if(family!=0) {
             const std::string sensorId(sens->sensid());
             jstring jid=env->NewStringUTF(sensorId.c_str());
             if(!jid) return;
@@ -602,9 +603,9 @@ static void uploadSensorStarts(const bool useV3) {
             if(resolved<=0)
                 continue;
             start=static_cast<uint32_t>(resolved);
+            if(start<oldest || start>nu+3600)
+                continue;
             }
-        if(!start || start<oldest || start>nu+3600)
-            continue;
         const std::string_view serial=sens->showsensorname();
         const std::string_view sid=sens->sensid();
         const std::string sensorId(sid);
