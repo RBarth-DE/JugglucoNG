@@ -78,8 +78,17 @@ public:
             if (!previousPool.empty()) {
                 const auto &head = previousPool[(previousPinned ? 1 : 0) +
                     cursor % (previousPool.size() - (previousPinned ? 1 : 0))];
-                for (size_t i = pinned; i < pool.size(); ++i)
-                    if (sameEndpoint(pool[i], head)) { kept = i - pinned; break; }
+                // The same account first: several accounts can share one
+                // endpoint. Only refreshed credentials fall back to it.
+                const auto find = [&](auto &&match) {
+                    for (size_t i = pinned; i < pool.size(); ++i)
+                        if (match(pool[i])) return i - pinned;
+                    return span;
+                };
+                kept = find([&](const TurnRelay &relay) { return relay.sameService(head); });
+                if (kept == span)
+                    kept = find([&](const TurnRelay &relay) { return sameEndpoint(relay, head); });
+                if (kept == span) kept = 0;
             }
             previousPool = pool;
             previousPinned = pinned != 0;

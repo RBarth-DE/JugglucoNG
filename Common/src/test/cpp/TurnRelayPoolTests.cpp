@@ -133,6 +133,19 @@ int main() {
         // Alone, the own relay is the whole selection.
         assert(pinned.select({relay("own")}, 9, true).size() == 1);
     }
+    {
+        // Two accounts on one endpoint: after the first fails, a pool change
+        // (a Twilio token arriving) keeps the second account up next.
+        TurnRelayRotation shared;
+        auto second = relay("shared"); second.username = "second";
+        std::vector<TurnRelay> accounts{relay("own"), relay("shared"), second, relay("b")};
+        assert(shared.select(accounts, 1, true)[1].username == "user");
+        shared.answered(1);
+        shared.failedAttempt(1);
+        accounts.push_back(relay("twilio", TurnRelayTransport::Tls, "twilio"));
+        const auto selected = shared.select(accounts, 2, true);
+        assert(selected[1].host == "shared" && selected[1].username == "second");
+    }
     pool.clear();
     appendTurnRelay(pool, relay("a"));
     appendTurnRelay(pool, relay("a"));
