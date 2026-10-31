@@ -857,6 +857,11 @@ public class SensorBluetooth {
             Natives.setcurrentsensor(nativeSerial != null && !nativeSerial.isEmpty() ? nativeSerial : serial);
         } else {
             ManagedCurrentSensor.set(serial);
+            final String nativeMirror = SensorIdentity.nativeMirrorSensorName(serial);
+            if (nativeMirror != null) {
+                Natives.setcurrentsensor(nativeMirror);
+                return;
+            }
             final String current = Natives.lastsensorname();
             if (current != null && !current.isEmpty() && !SensorIdentity.hasNativeSensorBacking(current)) {
                 Natives.setcurrentsensor("");

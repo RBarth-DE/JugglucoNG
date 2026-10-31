@@ -64,6 +64,25 @@ object ManagedCurrentSensor {
         prefs()?.edit()?.remove(KEY_CURRENT)?.apply()
     }
 
+    /**
+     * Point native `current` at the managed main sensor's native mirror, once that mirror
+     * exists. Selecting a managed sensor before its first reading, or an install that picked
+     * it before [SensorBluetooth.setCurrentSensorSelection] did this, otherwise leaves native
+     * consumers (web server sgv.json, watch value) on the previously selected sensor.
+     *
+     * [mainSensorId] is the sensor actually resolved as main: a stale managed id that lost
+     * the main role (not active any more) must not drag native onto its old mirror.
+     */
+    @JvmStatic
+    fun syncNativeCurrent(mainSensorId: String?) {
+        val managed = get() ?: return
+        if (mainSensorId.isNullOrBlank() || !SensorIdentity.matches(mainSensorId, managed)) return
+        val current = runCatching { Natives.lastsensorname() }.getOrNull()
+        if (current != null && SensorIdentity.matches(current, managed)) return
+        val nativeMirror = SensorIdentity.nativeMirrorSensorName(managed) ?: return
+        runCatching { Natives.setcurrentsensor(nativeMirror) }
+    }
+
     @JvmStatic
     fun clearIfMatches(sensorId: String?) {
         val current = get() ?: return
