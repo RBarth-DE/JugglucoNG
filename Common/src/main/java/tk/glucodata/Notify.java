@@ -4185,7 +4185,8 @@ public class Notify {
         // The canonical trend list: derived from the same rows before the chart's own
         // augmentation, so the arrow regresses over byte-identical points with the
         // dashboard hero and the computed-trend broadcast.
-        java.util.List<GlucosePoint> nativePoints = DisplayTrendSource.resolveTrendPoints(chartPoints, resolvedDisplay,
+        java.util.List<GlucosePoint> nativePoints = DisplayTrendSource.resolveTrendPoints(
+                DisplayTrendSource.endingAtShown(chartPoints, resolvedDisplay), resolvedDisplay,
                 activeSensorSerial);
 
         BatteryTrace.bump(
@@ -4640,7 +4641,8 @@ public class Notify {
         }
 
         // Same canonical trend list as the update path, the dashboard hero and the broadcast.
-        java.util.List<GlucosePoint> nativePoints = DisplayTrendSource.resolveTrendPoints(chartPoints, current,
+        java.util.List<GlucosePoint> nativePoints = DisplayTrendSource.resolveTrendPoints(
+                DisplayTrendSource.endingAtShown(chartPoints, current), current,
                 activeSensorSerial);
 
         // Identify ViewMode for Startup

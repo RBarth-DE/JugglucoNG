@@ -295,13 +295,8 @@ static NightUploadRange *getRecentNightUploadRange(const int sensorid,const bool
 static void rememberRecentNightUpload(const int sensorid,const uint32_t start,const uint32_t end) {
     if(!start || !end)
         return;
-    auto *range=getRecentNightUploadRange(sensorid,true);
-    if(!range)
-        return;
-    if(!range->start || start<range->start)
-        range->start=start;
-    if(end>range->end)
-        range->end=end;
+    if(auto *range=getRecentNightUploadRange(sensorid,true))
+        *range={start,end};
     }
 
 static void pruneRecentNightUpload(const int sensorid,const uint32_t tim) {
@@ -847,6 +842,15 @@ static int resolveNightStartSensor(const int last,const uint32_t mintime) {
     return cached;
     }
 
+/* A Nightscout follower's readings were read from Nightscout. Upload and Follow are exclusive,
+   so in Upload mode they are only what is left over from following: posting them sends the
+   server its own readings back under this phone's device name, and a Resend posts all of them. */
+static bool isNightscoutFollowerSensor(const SensorGlucoseData *sens) {
+    constexpr std::string_view prefix{"NSF-"};
+    const std::string_view id=sens->sensid();
+    return id.size()>=prefix.size()&&id.substr(0,prefix.size())==prefix;
+    }
+
 static bool uploadCGM3(const bool prioritizeRecent=false) {
     LOGSTRING("upload\n");
     uploadSmoothingSeconds=getExchangeSmoothingSeconds();
@@ -865,6 +869,8 @@ static bool uploadCGM3(const bool prioritizeRecent=false) {
     int newstartsensor=startsensor;
     for(int sensorid=last;sensorid>=startsensor;--sensorid) {
         if(SensorGlucoseData *sens=sensors->getSensorData(sensorid)) {
+            if(isNightscoutFollowerSensor(sens))
+                continue;
             std::span<const ScanData> gdata=sens->getPolldata();
             const sensorname_t *sensorname=sens->shortsensorname();
             int len=gdata.size();
@@ -945,6 +951,8 @@ static bool uploadCGM(const bool prioritizeRecent=false) {
     constexpr const int maxuploaditems=120;
     for(int sensorid=last;sensorid>=startsensor;--sensorid) {
         if(SensorGlucoseData *sens=sensors->getSensorData(sensorid)) {
+            if(isNightscoutFollowerSensor(sens))
+                continue;
             std::span<const ScanData> gdata=sens->getPolldata();
             const sensorname_t *sensorname=sens->shortsensorname();
             const int totallen=gdata.size();
