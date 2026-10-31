@@ -611,7 +611,8 @@ fun SettingsSlider(
 /**
  * A choice between a few short options in a [SettingsControlsCard]: the title over a
  * [tk.glucodata.ui.util.ConnectedButtonGroup]. With [multiSelect], [selectedOptions] holds
- * the checked ones, which carry a check mark.
+ * the checked ones, which carry a check mark. [maxItemsPerRow] keeps longer lists in
+ * aligned rows. [titleTrailingContent] can hold a help button without enlarging the heading.
  */
 @Composable
 fun <T> SettingsChoice(
@@ -623,28 +624,45 @@ fun <T> SettingsChoice(
     selectedOptions: List<T> = emptyList(),
     multiSelect: Boolean = false,
     modifier: Modifier = Modifier,
+    maxItemsPerRow: Int = Int.MAX_VALUE,
+    titleTrailingContent: (@Composable () -> Unit)? = null,
 ) {
     // The bottom padding matches the room a slider leaves under its track.
     Column(
         modifier = modifier.fillMaxWidth().padding(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        tk.glucodata.ui.util.ConnectedButtonGroup(
-            options = options,
-            selectedOption = selectedOption,
-            selectedOptions = selectedOptions,
-            multiSelect = multiSelect,
-            onOptionSelected = onOptionSelected,
-            label = {},
-            labelText = { labels[options.indexOf(it)] },
-            modifier = Modifier.fillMaxWidth(),
-            selectedContainerColor = MaterialTheme.colorScheme.secondary,
-            selectedContentColor = MaterialTheme.colorScheme.onSecondary,
-            // Match the recessed unselected controls used by alert settings.
-            unselectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
-            unselectedContentColor = MaterialTheme.colorScheme.onSurface
-        )
+        if (titleTrailingContent == null) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                // Let a 48dp help target extend into the card inset and title gap,
+                // keeping the same title height as the other settings choices.
+                Box(Modifier.height(24.dp).wrapContentHeight(unbounded = true)) {
+                    titleTrailingContent()
+                }
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.chunked(maxItemsPerRow).forEach { row ->
+                tk.glucodata.ui.util.ConnectedButtonGroup(
+                    options = row,
+                    selectedOption = selectedOption,
+                    selectedOptions = selectedOptions,
+                    multiSelect = multiSelect,
+                    onOptionSelected = onOptionSelected,
+                    label = {},
+                    labelText = { labels[options.indexOf(it)] },
+                    modifier = Modifier.fillMaxWidth(),
+                    selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                    selectedContentColor = MaterialTheme.colorScheme.onSecondary,
+                    // Match the recessed unselected controls used by alert settings.
+                    unselectedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
     }
 }
 
