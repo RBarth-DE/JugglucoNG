@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.os.Handler
 import java.util.UUID
 import java.time.Duration
 import org.robolectric.shadows.ShadowSystemClock
@@ -188,6 +189,163 @@ class ICanHealthAddressRebindTests {
         assertFalse(manager.matchDeviceName("ICN-7BF00099C663", "AA:BB:CC:DD:EE:03"))
         assertNull(get("pendingAddressRebind"))
         assertEquals(oldAddress, manager.mActiveDeviceAddress)
+    }
+
+    @Test fun waitingOldAddressGattYieldsToStaleMatchingAdvertisement() {
+        restoreWaitingOldAddress()
+        SuperGattCallback::class.java.getDeclaredField("foundtime").apply { isAccessible = true }
+            .setLong(manager, 42L)
+        assertTrue(manager.matchDeviceName(sensor, candidateAddress))
+        assertTrue(radio.closed)
+        assertNull(currentGatt())
+        assertEquals(0L, SuperGattCallback::class.java.getDeclaredField("foundtime")
+            .apply { isAccessible = true }.getLong(manager))
+        manager.setDevice(BluetoothAdapter.getDefaultAdapter().getRemoteDevice(candidateAddress))
+        // The retired attempt can report CONNECTED after close, including before a replacement exists.
+        manager.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertNull(currentGatt())
+        assertEquals(ICanHealthBleManager.Phase.IDLE, manager.phase)
+        assertEquals(candidateAddress, manager.mActiveDeviceAddress)
+    }
+
+    @Test fun unrelatedAdvertisementDoesNotRetireWaitingConnection() {
+        restoreWaitingOldAddress()
+        assertFalse(manager.matchDeviceName("7BF00099C664AABB", candidateAddress))
+        assertFalse(radio.closed)
+        assertSame(gatt, currentGatt())
+    }
+
+    @Test fun freshReadingDoesNotRetireWaitingConnection() {
+        restoreWaitingOldAddress()
+        set("lastGlucoseReceiptRealtimeMs", System.currentTimeMillis())
+        assertFalse(manager.matchDeviceName(sensor, candidateAddress))
+        assertFalse(radio.closed)
+        assertSame(gatt, currentGatt())
+    }
+
+    @Test fun establishedConnectionDoesNotYieldToAnotherAddress() {
+        restoreWaitingOldAddress()
+        manager.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertTrue(manager.hasLocallyConnectedGatt())
+        assertFalse(manager.matchDeviceName(sensor, candidateAddress))
+        assertFalse(radio.closed)
+    }
+
+    @Test fun silentAttemptIsBoundedEvenBeforeNativeShellExists() {
+        restoreWaitingOldAddress()
+        val timeout = manager.javaClass.getDeclaredMethod("connectionAttemptTimeoutMillis")
+            .apply { isAccessible = true }.invoke(manager) as Long
+        assertTrue(timeout in 1L..120_000L)
+        SuperGattCallback::class.java.getDeclaredMethod("watchConnectionAttempt", BluetoothGatt::class.java)
+            .apply { isAccessible = true }.invoke(manager, gatt)
+        assertSame(gatt, deadlineAttempt())
+        set("uiPaused", true) // Isolate expiry from starting a real replacement radio attempt.
+        SuperGattCallback::class.java.getDeclaredMethod("connectionAttemptExpired", BluetoothGatt::class.java)
+            .apply { isAccessible = true }.invoke(manager, gatt)
+        assertTrue(radio.closed)
+        assertNull(currentGatt())
+        assertNull(deadlineAttempt())
+    }
+
+    @Test fun connectedCallbackCancelsSilentAttemptDeadline() {
+        restoreWaitingOldAddress()
+        SuperGattCallback::class.java.getDeclaredMethod("watchConnectionAttempt", BluetoothGatt::class.java)
+            .apply { isAccessible = true }.invoke(manager, gatt)
+        assertSame(gatt, deadlineAttempt())
+        manager.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertNull(deadlineAttempt())
+        assertSame(gatt, currentGatt())
+    }
+
+    @Test fun emptyDiscoveryCanRecoverAfterBackoff() {
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        assertRolledBack()
+        retrySameCandidate()
+        addCgmSurface()
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        deliverSerial(sensor)
+        assertEquals(candidateAddress, ICanHealthRegistry.findRecord(context, sensor)?.address)
+    }
+
+    @Test fun partialGenericDiscoveryCanRetry() {
+        radio.discoveredServices.add(BluetoothGattService(
+            UUID.fromString("00001800-0000-1000-8000-00805f9b34fb"), BluetoothGattService.SERVICE_TYPE_PRIMARY))
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        assertRolledBack()
+        retrySameCandidate()
+    }
+
+    @Test fun cgmWithoutMeasurementCanRetry() {
+        radio.discoveredServices.add(BluetoothGattService(
+            ICanHealthConstants.CGM_SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY))
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        assertRolledBack()
+        retrySameCandidate()
+    }
+
+    @Test fun missingDisSerialCanRecoverAfterBackoff() {
+        addCgmSurface(withSerial = false)
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        assertRolledBack()
+        retrySameCandidate()
+        addCgmSurface()
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        deliverSerial(sensor)
+        assertEquals(candidateAddress, ICanHealthRegistry.findRecord(context, sensor)?.address)
+    }
+
+    @Test fun emptySerialCanRecoverAfterBackoff() {
+        addCgmSurface()
+        manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        deliverSerial("")
+        assertRolledBack()
+        retrySameCandidate()
+    }
+
+    @Test fun nonCgmRejectionRequiresTwoConclusiveDiscoveries() {
+        fun discoverNonCgm() {
+            radio.discoveredServices.add(BluetoothGattService(
+                UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb"), BluetoothGattService.SERVICE_TYPE_PRIMARY))
+            manager.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+            assertRolledBack()
+        }
+        discoverNonCgm()
+        retrySameCandidate()
+        discoverNonCgm()
+        ShadowSystemClock.advanceBy(Duration.ofSeconds(61))
+        assertFalse(manager.matchDeviceName(sensor, candidateAddress))
+    }
+
+    private fun restoreWaitingOldAddress() {
+        (get("handler") as Handler).removeCallbacks(get("rebindTimeoutRunnable") as Runnable)
+        set("pendingAddressRebind", null)
+        manager.close()
+        manager.setDevice(oldDevice)
+        newGatt(oldDevice)
+    }
+
+    private fun newGatt(device: BluetoothDevice) {
+        gatt = Shadow.newInstanceOf(BluetoothGatt::class.java)
+        radio = Shadow.extract(gatt)
+        radio.remoteDevice = device
+        SuperGattCallback::class.java.getDeclaredField("mBluetoothGatt").apply { isAccessible = true }
+            .set(manager, gatt)
+    }
+
+    private fun currentGatt(): Any? = SuperGattCallback::class.java.getDeclaredField("mBluetoothGatt")
+        .apply { isAccessible = true }.get(manager)
+
+    private fun deadlineAttempt(): Any? {
+        val deadline = SuperGattCallback::class.java.getDeclaredField("connectDeadline")
+            .apply { isAccessible = true }.get(manager)
+        return deadline.javaClass.getDeclaredField("current").apply { isAccessible = true }.get(deadline)
+    }
+
+    private fun retrySameCandidate() {
+        ShadowSystemClock.advanceBy(Duration.ofSeconds(61))
+        assertTrue(manager.matchDeviceName(sensor, candidateAddress))
+        manager.setDevice(BluetoothAdapter.getDefaultAdapter().getRemoteDevice(candidateAddress))
+        newGatt(manager.mActiveBluetoothDevice)
     }
 
     private fun assertRolledBack() {

@@ -133,7 +133,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
 
     private void connectionAttemptExpired(BluetoothGatt attempt) {
         // The deadline holds this callback's monitor, also used for GATT replacement.
-        if (mBluetoothGatt != attempt || stop || dataptr == 0L
+        if (mBluetoothGatt != attempt || stop || (dataptr == 0L && !allowConnectWithoutDataptr())
                 || CloneSensorRegistry.isCloneSensor(SerialNumber)
                 || SensorOwnershipRuntime.blocksLocalConnection(SerialNumber)) return;
         Log.i(LOG_ID, SerialNumber + " no connection result before deadline; retrying");

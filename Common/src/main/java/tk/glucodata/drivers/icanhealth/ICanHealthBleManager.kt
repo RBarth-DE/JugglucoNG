@@ -61,6 +61,7 @@ class ICanHealthBleManager(
 
         const val SENSOR_GEN = 0
 
+        private const val CONNECTION_ATTEMPT_TIMEOUT_MS = 120_000L
         private const val GATT_OP_TIMEOUT_MS = 10_000L
         private const val REBIND_CANDIDATE_TIMEOUT_MS = 45_000L
         private const val REBIND_RETRY_BACKOFF_MS = 60_000L
@@ -1113,6 +1114,13 @@ class ICanHealthBleManager(
         }
     }
 
+    protected override fun connectionAttemptTimeoutMillis(): Long = CONNECTION_ATTEMPT_TIMEOUT_MS
+
+    protected override fun onConnectionAttemptTimeout() {
+        // A silent autoConnect at a saved address must periodically allow discovery elsewhere.
+        handler.post { if (!stop && !uiPaused) SensorBluetooth.startscan() }
+    }
+
     @Synchronized
     override fun connectDevice(delayMillis: Long): Boolean {
         if (stop || uiPaused) {
@@ -1216,7 +1224,7 @@ class ICanHealthBleManager(
             if (address != null && address.equals(knownAddress, ignoreCase = true)) {
                 return true
             }
-            if (pendingAddressRebind != null || phase != Phase.IDLE || mBluetoothGatt != null) return false
+            if (pendingAddressRebind != null || phase != Phase.IDLE || hasLocallyConnectedGatt()) return false
             val savedIds = listOf(SerialNumber, serialFromDevice, rawSerialFromDevice)
                 .map { ICanHealthConstants.canonicalSensorId(it) }
                 .filter { it.isNotEmpty() && !ICanHealthConstants.isProvisionalSensorId(it) }
@@ -1230,6 +1238,11 @@ class ICanHealthBleManager(
                 nowMs = System.currentTimeMillis(),
             )
             if (rebind) {
+                // IDLE can still own a waiting autoConnect or a queued connection runnable.
+                // Retire it under the same monitor before selecting the recovery candidate.
+                close()
+                searchforDeviceAddress() // Reset scan ownership so SensorBluetooth connects the new device.
+                setDeviceAddress(knownAddress)
                 pendingAddressRebind = PendingAddressRebind(
                     previousAddress = knownAddress,
                     previousDevice = mActiveBluetoothDevice,
@@ -1348,6 +1361,11 @@ class ICanHealthBleManager(
 
     @Synchronized
     override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+        if (!acceptConnectionAttemptCallback(gatt, newState)) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) runCatching { gatt.disconnect() }
+            runCatching { gatt.close() }
+            return
+        }
         noteFirstGattCallback("onConnectionStateChange", gatt)
         super.onConnectionStateChange(gatt, status, newState)
         if (stop) return
@@ -1361,18 +1379,6 @@ class ICanHealthBleManager(
             }
             return
         }
-        val currentGatt = mBluetoothGatt
-        if (currentGatt != null && currentGatt !== gatt) {
-            Log.d(TAG, "Ignoring stale GATT state=$newState status=$status for $SerialNumber")
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                runCatching { gatt.disconnect() }
-            }
-            if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                runCatching { gatt.close() }
-            }
-            return
-        }
-
         when (newState) {
             BluetoothProfile.STATE_CONNECTED -> {
                 Log.i(TAG, "Connected to ${gatt.device?.address}")
@@ -1536,7 +1542,11 @@ class ICanHealthBleManager(
 
         if (charMeasurement == null) {
             Log.e(TAG, "CGM measurement characteristic missing")
-            if (rejectRebindCandidate("CGM measurement characteristic missing", blacklist = true)) return
+            val pending = pendingAddressRebind
+            if (pending != null && rejectRebindCandidate(
+                    "CGM measurement characteristic missing",
+                    blacklist = hasConfirmedNonCgmDiscovery(gatt, pending.candidateAddress),
+                )) return
             if (rejectNonCgmOnboardingCandidate(gatt)) {
                 return
             }
@@ -1546,7 +1556,7 @@ class ICanHealthBleManager(
         gatt.device?.address?.trim()?.uppercase(Locale.US)?.let { nonCgmCandidateStrikes.remove(it) }
 
         if (pendingAddressRebind != null && disService?.getCharacteristic(ICanHealthConstants.SERIAL_NUMBER) == null) {
-            rejectRebindCandidate("DIS serial characteristic missing", blacklist = true)
+            rejectRebindCandidate("DIS serial characteristic missing")
             return
         }
         setUiStatus(UiStatusKind.PREPARING)
@@ -1686,7 +1696,7 @@ class ICanHealthBleManager(
                     handleResolvedSerial(resolvedSerial)
                     pendingAddressRebind = null
                     handler.removeCallbacks(rebindTimeoutRunnable)
-                } else if (rejectRebindCandidate("empty DIS serial", blacklist = true)) {
+                } else if (rejectRebindCandidate("empty DIS serial")) {
                     return
                 }
             }
@@ -1778,6 +1788,13 @@ class ICanHealthBleManager(
         if (!address.equals(onboardingScanPickedAddress, ignoreCase = true)) {
             return false
         }
+        if (!hasConfirmedNonCgmDiscovery(gatt, address)) return false
+        dropOnboardingCandidate(address)
+        return true
+    }
+
+    /** Empty/partial discovery is inconclusive; require the same evidence as onboarding. */
+    private fun hasConfirmedNonCgmDiscovery(gatt: BluetoothGatt, address: String): Boolean {
         val services = runCatching { gatt.services.map { it.uuid } }.getOrDefault(emptyList())
         if (!ICanHealthConstants.isConclusivelyNotCgm(services)) {
             nonCgmCandidateStrikes.remove(address)
@@ -1791,7 +1808,6 @@ class ICanHealthBleManager(
         }
         nonCgmCandidateStrikes.remove(address)
         Log.w(TAG, "Rejected iCan candidate address=$address: no CGM service on ${services.size} services")
-        dropOnboardingCandidate(address)
         return true
     }
 
