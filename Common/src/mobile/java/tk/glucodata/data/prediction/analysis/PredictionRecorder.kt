@@ -128,7 +128,7 @@ object PredictionRecorder : PredictionAnalysisBridge {
         val consumer = buildSmoothedConsumerHistory(
             points = history,
             evaluationSmoothingMinutes = DataSmoothing.localSmoothingMinutes(context),
-            collapseChunks = DataSmoothing.collapseChunks(context),
+            evaluationCollapseMinutes = DataSmoothing.localCollapseMinutes(context),
         )
         val viewMode = CurrentDisplaySource.resolveViewModeForSensor(serial)
         val targetLow = runCatching { Natives.targetlow() }.getOrDefault(Float.NaN)
