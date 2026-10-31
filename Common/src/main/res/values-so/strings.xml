@@ -3351,4 +3351,6 @@ Marka la cadaadiyo OK waxay dhalin doontaa xidhiidh teleefankan oo waxa ay soo b
         <item quantity="one">Waxaa lagu daray %d qoraal joornaal oo qorsheysan</item>
         <item quantity="other">Waxaa lagu daray %d qoraal joornaal oo qorsheysan</item>
     </plurals>
+    <string name="nightscout_upload_sensor_start">Dir bilowga dareemaha</string>
+    <string name="nightscout_upload_sensor_start_desc">Dir dhacdada Sensor Start ee dareeme kasta (daʼda, nooca iyo lambarka taxanaha)</string>
 </resources>

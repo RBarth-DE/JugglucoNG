@@ -55,6 +55,7 @@ static std::atomic<int> lastNightUploadResponseCode{0};
 static std::atomic<long long> lastNightUploadAttemptTime{0};
 static std::atomic<long long> lastNightUploadSuccessTime{0};
 static std::atomic<int> lastNightUploadWaitMinutes{0};
+static std::atomic<time_t> lastSensorStartAttempt{0};
 static bool lastNightUploadConfigError = false;
 struct NightUploadRange {
     uint32_t start{};
@@ -341,6 +342,7 @@ static void reset() {
     settings->data()->lastuploadtime=0;
     for(auto &range:recentNightUploads)
         range={};
+    lastSensorStartAttempt=0;
     for(int sensorid=0;sensorid<=last;sensorid++) {
         if(SensorGlucoseData *sens=sensors->getSensorData(sensorid)) {
             __atomic_store_n(&sens->getinfo()->nightiter,0,__ATOMIC_RELAXED);
@@ -394,8 +396,7 @@ static bool devicestatusIsV3() {
     return settings->data()->nightscoutV3 && jnightuploadDevicestatus3url!=nullptr;
     }
 
-static bool queueNightuploadDevicestatus(const char *data,int len) {
-    jstring url=devicestatusIsV3()?jnightuploadDevicestatus3url:jnightuploadDevicestatusurl;
+static bool queueNightuploadAsync(jstring url,const char *data,int len,const bool sensorStart=false) {
     if(url==nullptr || nightpostclass==nullptr)
         return false;
     auto env=getenv();
@@ -406,7 +407,13 @@ static bool queueNightuploadDevicestatus(const char *data,int len) {
         "uploadDeviceStatusAsync",
         "(Ljava/lang/String;[BLjava/lang/String;Z)Z"
     );
-    if(uploadAsync==nullptr) {
+    const static jmethodID sensorAsync=env->GetStaticMethodID(
+        nightpostclass,
+        "uploadSensorStartAsync",
+        "(Ljava/lang/String;[BLjava/lang/String;Z)Z"
+    );
+    const auto method=sensorStart?sensorAsync:uploadAsync;
+    if(method==nullptr) {
         if(env->ExceptionCheck())
             env->ExceptionClear();
         LOGSTRING("Nightscout device-status async method unavailable\n");
@@ -423,7 +430,7 @@ static bool queueNightuploadDevicestatus(const char *data,int len) {
         }
     const jboolean queued=env->CallStaticBooleanMethod(
         nightpostclass,
-        uploadAsync,
+        method,
         url,
         payload,
         jnightuploadsecret,
@@ -501,7 +508,8 @@ static bool uploadDeviceStatus() {
     else
         addar(ptr,R"(,"type":"PHONE"}}])");
     *ptr='\0';
-    const bool queued=queueNightuploadDevicestatus(buf,ptr-buf);
+    jstring url=v3?jnightuploadDevicestatus3url:jnightuploadDevicestatusurl;
+    const bool queued=queueNightuploadAsync(url,buf,ptr-buf);
     LOGGER("Nightscout device-status battery=%d queued=%d\n",battery,queued);
     return queued;
     }
@@ -531,6 +539,114 @@ static void uploadIobDeviceStatus() {
     if(env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
+        }
+    }
+
+
+static bool isNightscoutFollowerSensor(const SensorGlucoseData *sens);
+
+//"Sensor Start" treatments so Nightscout's sage plugin shows the sensor age. One per sensor
+//started in the last 30 days. It's fine to send this treatment repeatedly since Nightscout
+//deduplicates it.
+static int nextSensorStartIndex=-1;
+static void uploadSensorStarts(const bool useV3) {
+    jstring url=useV3?jnightuploadTreatments3url:jnightuploadTreatmentsurl;
+    if(nightpostclass==nullptr || url==nullptr)
+        return;
+    const time_t nu=time(nullptr);
+    const time_t lastAttempt=lastSensorStartAttempt.load();
+    if(lastAttempt && nu>=lastAttempt && nu-lastAttempt<devicestatusintervalsecs)
+        return;
+    auto env=getenv();
+    if(env==nullptr)
+        return;
+    const static jmethodID enabledmid=env->GetStaticMethodID(nightpostclass,"getUploadSensorStart","()Z");
+    const static jmethodID labelmid=env->GetStaticMethodID(nightpostclass,"getSensorStartLabel","(Ljava/lang/String;)Ljava/lang/String;");
+    const static jmethodID starttimemid=env->GetStaticMethodID(nightpostclass,"getSensorStartTime","(Ljava/lang/String;JI)J");
+    if(enabledmid==nullptr || labelmid==nullptr || starttimemid==nullptr) {
+        if(env->ExceptionCheck())
+            env->ExceptionClear();
+        return;
+        }
+    const jboolean enabled=env->CallStaticBooleanMethod(nightpostclass,enabledmid);
+    if(env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return;
+        }
+    if(!enabled)
+        return;
+    const uint32_t oldest=nu-30*24*60*60;
+    const int last=sensors->last();
+    if(last<0) return;
+    if(nextSensorStartIndex<0 || nextSensorStartIndex>last) nextSensorStartIndex=last;
+    for(int checked=0,sensorid=nextSensorStartIndex;checked<=last;
+        ++checked,sensorid=sensorid>0?sensorid-1:last) {
+        const SensorGlucoseData *sens=sensors->getSensorData(sensorid);
+        if(!sens || !sens->getinfo() || isNightscoutFollowerSensor(sens))
+            continue;
+        const auto *info=sens->getinfo();
+        const unsigned family=info->managedFamilyCode();
+        uint32_t start=sens->getstarttime();
+        if(!start || start<oldest || start>nu+3600)
+            continue;
+        const std::string sensorId(sens->sensid());
+        jstring startid=env->NewStringUTF(sensorId.c_str());
+        if(!startid) return;
+        const jlong resolved=env->CallStaticLongMethod(
+            nightpostclass,starttimemid,startid,static_cast<jlong>(start),static_cast<jint>(family));
+        env->DeleteLocalRef(startid);
+        if(env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return;
+            }
+        if(resolved<=0)
+            continue;
+        start=static_cast<uint32_t>(resolved);
+        if(start<oldest || start>nu+3600)
+            continue;
+        const std::string_view serial=sens->showsensorname();
+        const std::string_view sid=sens->sensid();
+        jstring jid=env->NewStringUTF(sensorId.c_str());
+        if(!jid) return;
+        auto jlabel=static_cast<jstring>(env->CallStaticObjectMethod(nightpostclass,labelmid,jid));
+        env->DeleteLocalRef(jid);
+        if(env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return;
+            }
+        if(!jlabel) return;
+        const char *labelChars=env->GetStringUTFChars(jlabel,nullptr);
+        if(!labelChars) {
+            env->DeleteLocalRef(jlabel);
+            return;
+            }
+        const std::string label(labelChars);
+        env->ReleaseStringUTFChars(jlabel,labelChars);
+        env->DeleteLocalRef(jlabel);
+        // JSON escaping can expand each input byte to six bytes.
+        std::vector<char> buf(256+6*(label.size()+serial.size()+std::min(sid.size(),size_t{64})));
+        char *ptr=buf.data();
+        if(!useV3)
+            *ptr++='[';
+        addar(ptr,R"({"eventType":"Sensor Start","created_at":")");
+        addNightscoutDateStringGMT(ptr,start);
+        addar(ptr,R"(","date":)");
+        addjsonint(ptr,(long long)start*1000LL);
+        addar(ptr,R"(,"enteredBy":"JugglucoNG","app":"JugglucoNG","notes":")");
+        addjsonescaped(ptr,label);
+        *ptr++=' ';
+        addjsonescaped(ptr,serial);
+        addar(ptr,R"(","identifier":"sensorstart-)");
+        addjsonescaped(ptr,sid.substr(0,64));
+        addar(ptr,R"("})");
+        if(!useV3)
+            *ptr++=']';
+        *ptr='\0';
+        if(queueNightuploadAsync(url,buf.data(),ptr-buf.data(),true)) {
+            lastSensorStartAttempt=nu;
+            nextSensorStartIndex=sensorid>0?sensorid-1:last;
+            }
+        return;
         }
     }
 
@@ -1199,6 +1315,7 @@ static void uploaderthread() {
             //overwrites the primary glucose uploader status or blocks this serialized upload loop.
             uploadDeviceStatus();
             uploadIobDeviceStatus();
+            uploadSensorStarts(useV3);
             }
         if(glucosefailed)
             waitmin=lastNightUploadConfigError?1:15;
