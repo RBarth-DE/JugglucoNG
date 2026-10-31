@@ -93,6 +93,7 @@ public class NightPost  {
     private static final int ANCILLARY_TOKEN_CONNECT_TIMEOUT_MS = 10_000;
     private static final int ANCILLARY_TOKEN_READ_TIMEOUT_MS = 15_000;
     private static final AtomicBoolean deviceStatusUploadInFlight = new AtomicBoolean(false);
+    private static final AtomicBoolean sensorStartUploadInFlight = new AtomicBoolean(false);
     /**
      * Outcome of the IOB devicestatus upload, for the settings screen. The status card
      * otherwise only reports the native entries uploader, so a dead devicestatus path was
@@ -524,6 +525,7 @@ static public int batteryPercent() {
 
 private static final String PREFS_NAME="tk.glucodata_preferences";
 private static final String PREF_UPLOAD_IOB="nightscout_upload_iob";
+private static final String PREF_UPLOAD_SENSOR_START="nightscout_upload_sensor_start";
 private static long iobStatusUploadTime=0L;
 private static float iobStatusLastIob=Float.NaN;
 private static float iobStatusLastEiob=Float.NaN;
@@ -552,6 +554,35 @@ static public void setUploadIob(boolean enabled) {
             .edit()
             .putBoolean(PREF_UPLOAD_IOB, enabled)
             .apply();
+    }
+
+/**
+ * Default on: posts "Sensor Start" treatments so that Nightscout's
+ * sage plugin shows sensor age.
+ */
+@Keep
+static public boolean getUploadSensorStart() {
+    final Context context = Applic.getContext();
+    if(context == null)
+        return false;
+    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(PREF_UPLOAD_SENSOR_START, true);
+    }
+
+@Keep
+static public void setUploadSensorStart(boolean enabled) {
+    final Context context = Applic.getContext();
+    if(context == null)
+        return;
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_UPLOAD_SENSOR_START, enabled)
+            .apply();
+    }
+
+@Keep
+static public String getSensorStartLabel(String sensorId) {
+    return SensorSourceResolver.resolveSourceInfo(sensorId, SensorSourceResolver.SENSOR_KIND_UNKNOWN);
     }
 
 /**
@@ -655,6 +686,40 @@ static public boolean uploadDeviceStatusAsync(
         boolean put
 ) {
     return uploadDeviceStatusAsync(httpurl,postdata,secret,put,false);
+    }
+
+/** Adds Sensor Start to the same bounded queue as device status. */
+@Keep
+static public boolean uploadSensorStartAsync(
+        String httpurl,
+        byte[] postdata,
+        String secret,
+        boolean put
+) {
+    if(!sensorStartUploadInFlight.compareAndSet(false, true))
+        return false;
+    try {
+        deviceStatusExecutor.execute(() -> {
+            try {
+                final int code=uploadWithTimeouts(
+                        httpurl,postdata,secret,put?"PUT":"POST",
+                        DEVICE_STATUS_CONNECT_TIMEOUT_MS,DEVICE_STATUS_READ_TIMEOUT_MS,false,"sensor-start");
+                if(code==HTTP_OK || code==HttpURLConnection.HTTP_CREATED)
+                    Log.i(LOG_ID,"sensor-start upload accepted code="+code);
+                else if(code!=ERROR_NO_TOKEN)
+                    Log.e(LOG_ID,"sensor-start upload failed code="+code);
+            }
+            finally {
+                sensorStartUploadInFlight.set(false);
+            }
+        });
+        return true;
+    }
+    catch(Throwable th) {
+        sensorStartUploadInFlight.set(false);
+        Log.e(LOG_ID,"sensor-start scheduling failure:\n"+stackline(th));
+        return false;
+    }
     }
 
 /**

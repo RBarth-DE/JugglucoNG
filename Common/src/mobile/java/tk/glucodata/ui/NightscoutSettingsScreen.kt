@@ -251,6 +251,7 @@ fun NightscoutSettingsScreen(navController: NavController) {
     }
     var receiveTreatments by rememberSaveable { mutableStateOf(JournalTreatmentUploader.getReceiveTreatments()) }
     var uploadIob by rememberSaveable { mutableStateOf(NightPost.getUploadIob()) }
+    var uploadSensorStart by rememberSaveable { mutableStateOf(NightPost.getUploadSensorStart()) }
     var isV3 by rememberSaveable { mutableStateOf(Natives.getnightscoutV3()) }
     var followerV3 by rememberSaveable { mutableStateOf(followerConfig.useV3) }
     var showSecret by rememberSaveable { mutableStateOf(false) }
@@ -893,6 +894,20 @@ fun NightscoutSettingsScreen(navController: NavController) {
                             onCheckedChange = {
                                 uploadIob = it
                                 NightPost.setUploadIob(it)
+                                if (it) Natives.wakeuploader()
+                            },
+                            icon = Icons.Default.CloudUpload,
+                            iconTint = MaterialTheme.colorScheme.secondary,
+                            enabled = isActive,
+                            position = CardPosition.MIDDLE
+                        )
+                        SettingsSwitchItem(
+                            title = stringResource(R.string.nightscout_upload_sensor_start),
+                            subtitle = stringResource(R.string.nightscout_upload_sensor_start_desc),
+                            checked = uploadSensorStart,
+                            onCheckedChange = {
+                                uploadSensorStart = it
+                                NightPost.setUploadSensorStart(it)
                                 if (it) Natives.wakeuploader()
                             },
                             icon = Icons.Default.CloudUpload,
