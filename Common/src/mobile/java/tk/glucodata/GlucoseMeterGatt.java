@@ -53,8 +53,10 @@ import android.os.Build;
 import androidx.annotation.NonNull;
 
 import java.util.List;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import tk.glucodata.glucosemeter.MeterSyncPacing;
 import tk.glucodata.glucosemeter.SatelliteMeterCredentials;
 import tk.glucodata.glucosemeter.SatelliteMeterProtocol;
 import tk.glucodata.glucosemeter.SatelliteMeterSession;
@@ -135,13 +137,43 @@ private BluetoothGattCharacteristic SatelliteRxChar;
 private BluetoothGattCharacteristic SatelliteTxChar;
 private SatelliteMeterSession satelliteSession;
 private boolean satelliteMode=false;
-// When the last Satellite session ended, whatever its outcome; paces the reconnect after it.
-private long satelliteSessionEndedAt=0L;
-private java.util.concurrent.ScheduledFuture<?> pacedReconnect;
-private void cancelPacedReconnect() {
+
+// Reconnect pacing (MeterSyncPacing), all guarded by this. A link counts as synced once the
+// meter has answered the record request, whether or not it had anything new.
+private boolean linkSynced=false;
+private boolean linkBroughtNew=false;
+private ScheduledFuture<?> pacedReconnect;
+// Bumped by every cancel, so a paced task the executor already started sees it is stale.
+private long pacedTicket=0L;
+private synchronized void markLinkSynced() { linkSynced=true; }
+private synchronized void markLinkBroughtNew() { linkBroughtNew=true; }
+private synchronized void cancelPacedReconnect() {
+    ++pacedTicket;
     final var pending=pacedReconnect;
     pacedReconnect=null;
     if(pending!=null) pending.cancel(false);
+}
+private synchronized long pacedReconnectDelay() {
+    final long wait=MeterSyncPacing.reconnectDelayMillis(linkSynced,linkBroughtNew,MeterSyncPacing.minutes());
+    linkSynced=linkBroughtNew=false;
+    return wait;
+}
+private synchronized void schedulePacedReconnect(long wait) {
+    cancelPacedReconnect();
+    final long ticket=pacedTicket;
+    pacedReconnect=Applic.scheduler.schedule(()->runPacedReconnect(ticket),wait,TimeUnit.MILLISECONDS);
+}
+private synchronized void runPacedReconnect(long ticket) {
+    // Cancelled, removed, or connected some other way since: never touch a newer link.
+    if(ticket!=pacedTicket || stop || mBluetoothGatt!=null) return;
+    pacedReconnect=null;
+    openGatt();
+}
+/** The interval was changed: a meter waiting under the old one is dialled now. */
+synchronized void pacingChanged() {
+    if(pacedReconnect==null) return;
+    cancelPacedReconnect();
+    if(mBluetoothGatt==null && !stop) openGatt();
 }
 private BluetoothGattCharacteristic VerioWriteChar;
 private BluetoothGattCharacteristic VerioNotifyChar;
@@ -246,6 +278,8 @@ private void processVerioResponse(BluetoothGatt gatt, byte[] value) {
     final var readings=verioSession.takeReadings();
     if(!readings.isEmpty())
         persistVerioReadings(readings);
+    if(verioSession.isDone())
+        markLinkSynced();
     // the answer queues the ack and the next request, and no write is in
     // flight any more, so drain it here
     writeNextVerioCommand(gatt);
@@ -257,7 +291,10 @@ private void persistVerioReadings(List<VerioSession.Reading> readings) {
             meterIndex,reading.getTimestampMillis(),reading.getMgdlTenths());
         if(saved==null || saved.length<2) continue;
         GlucoseMeterJournalBridge.record(meterIndex,saved[0],saved[1]);
-        if(saved.length>=3 && saved[2]!=0L) newvalues=true;
+        if(saved.length>=3 && saved[2]!=0L) {
+            newvalues=true;
+            markLinkBroughtNew();
+            }
         final int stored=Natives.GlucoseMeterGetLastPos(meterIndex);
         if(reading.getRecord()>stored)
             Natives.GlucoseMeterSetLastPos(meterIndex,reading.getRecord());
@@ -272,8 +309,8 @@ private void beginSatelliteSession(BluetoothGatt gatt) {
     if(pin==null) {
         Log.e(LOG_ID,"Satellite meter code is missing or invalid");
         Applic.argToaster(app, R.string.satellite_meter_code_missing, android.widget.Toast.LENGTH_LONG);
-        // Not every 30 s until a code is entered; saving one retries at once.
-        satelliteSessionEndedAt=System.currentTimeMillis();
+        // Paced like an empty sync, not toasted every 30 s; saving a code retries at once.
+        markLinkSynced();
         return;
     }
     satelliteSession=new SatelliteMeterSession(pin,System.currentTimeMillis());
@@ -304,12 +341,15 @@ boolean newvalues=false;
                 }
                 if(saved != null && saved.length >= 3 && saved[2] != 0L) {
                     newvalues=true;
+                    markLinkBroughtNew();
                     receivedTime=System.currentTimeMillis();
                     updateview();
                     Applic.app.redraw();
                     }
                 break;
             case RecordsCharUUID:
+                // The RACP response closes the transfer, with or without records.
+                markLinkSynced();
                 if(Natives.recordCharacteristicChanged(value)) {
                     newvalues=true;
                     Applic.app.redraw();
@@ -336,7 +376,7 @@ private synchronized void processSatelliteResponse(BluetoothGatt gatt, byte[] va
     if(update.getComplete()) {
         persistSatelliteReadings(update.getReadings());
         satelliteSession=null;
-        satelliteSessionEndedAt=System.currentTimeMillis();
+        markLinkSynced();
         return;
     }
     final byte[] command=update.getCommand();
@@ -353,7 +393,10 @@ private void persistSatelliteReadings(List<SatelliteMeterProtocol.Reading> readi
         if(saved==null || saved.length<2) continue;
         stored=true;
         GlucoseMeterJournalBridge.record(meterIndex,saved[0],saved[1]);
-        if(saved.length>=3 && saved[2]!=0L) newvalues=true;
+        if(saved.length>=3 && saved[2]!=0L) {
+            newvalues=true;
+            markLinkBroughtNew();
+            }
     }
     if(stored) {
         receivedTime=System.currentTimeMillis();
@@ -489,7 +532,10 @@ boolean connected=false;
          // its job; go back to the battery-friendly whitelist reconnect for whenever
          // this link drops later.
          autoConnect=true;
-         // Connected some other way; the paced connect would close this link when it fires.
+         synchronized(this) {
+             linkSynced=linkBroughtNew=false;
+             }
+         // Connected some other way while a paced reconnect waited.
          cancelPacedReconnect();
         if(stop) {
             close();
@@ -531,12 +577,11 @@ boolean connected=false;
                         }
                   else {
                      if(autoConnect)  {
-                        final long wait=satelliteMode?SatelliteMeterProtocol.reconnectDelayMillis(satelliteSessionEndedAt,tim):0L;
+                        final long wait=pacedReconnectDelay();
                         if(wait>0L) {
-                            if(doLog) Log.i(LOG_ID,meterIndex+" Satellite synced, reconnect in "+wait/1000+"s");
+                            if(doLog) Log.i(LOG_ID,meterIndex+" nothing new, reconnect in "+wait/1000+"s");
                             close();
-                            cancelPacedReconnect();
-                            pacedReconnect=Applic.scheduler.schedule(getConnectDevice(),wait,TimeUnit.MILLISECONDS);
+                            schedulePacedReconnect(wait);
                             }
                         else if(useConnect)
                             bluetoothGatt.connect();
@@ -754,54 +799,60 @@ private void setCareSenseTime(BluetoothGatt bluetoothGatt) {
     private Runnable getConnectDevice() {
         disconnect();
         return () -> {
-             close();
-            if(doLog) {Log.i(LOG_ID,"getConnectDevice Runnable "+ meterIndex);};
-            // A delayed connect can outlive removal of the meter.
-            if(stop) return;
-            if(!BluetoothGlucoseMeter.bluetoothIsEnabled()) {
-                Log.e(LOG_ID, "!bluetoothIsEnabled() ");
-                return ;
-                }
-            var device= mActiveBluetoothDevice;
-            if(device==null) {
-                Log.e(LOG_ID, meterIndex +" "+"device==null");
-                return;
-                }
-        
-            if (mBluetoothGatt != null) {
-                if(doLog) {Log.d(LOG_ID, meterIndex + " mBluetoothGatt!=null");};
-                return;
-                }
-            if(doLog) {
-                var devname=device.getName();
-                if(devname!=null) {
-                        if(doLog)
-                            Log.d(LOG_ID, meterIndex + " Try connection to " + device.getAddress()+ " "+devname);;
-                        }
-                }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    mBluetoothGatt = device.connectGatt(app, autoConnect, this, BluetoothDevice.TRANSPORT_LE);
-                } else {
-                    mBluetoothGatt = device.connectGatt(app, autoConnect, this);
-                    }
-
-            if(doLog) {Log.i(LOG_ID,meterIndex+" after connectGatt ="+mBluetoothGatt);};
-            } catch (SecurityException se) {
-                var mess = se.getMessage();
-                mess = mess == null ? "" : mess;
-                String uit = ((Build.VERSION.SDK_INT > 30) ? Applic.getContext().getString(R.string.turn_on_nearby_devices_permission)  : mess) ;
-                Applic.Toaster(uit);
-
-                Log.stack(LOG_ID, meterIndex +" "+ "connectGatt", se);
-            } catch (Throwable e) {
-                Log.stack(LOG_ID, meterIndex +" "+ "connectGatt", e);
-
+            synchronized(this) {
+                close();
+                if(doLog) {Log.i(LOG_ID,"getConnectDevice Runnable "+ meterIndex);};
+                // A delayed connect can outlive removal of the meter.
+                if(!stop) openGatt();
                 }
         };
     }
 
-    public void close() {
+    // Callers hold this and have closed any previous transport.
+    private void openGatt() {
+        if(!BluetoothGlucoseMeter.bluetoothIsEnabled()) {
+            Log.e(LOG_ID, "!bluetoothIsEnabled() ");
+            return;
+            }
+        var device= mActiveBluetoothDevice;
+        if(device==null) {
+            Log.e(LOG_ID, meterIndex +" "+"device==null");
+            return;
+            }
+        
+        if (mBluetoothGatt != null) {
+            if(doLog) {Log.d(LOG_ID, meterIndex + " mBluetoothGatt!=null");};
+            return;
+            }
+        if(doLog) {
+            var devname=device.getName();
+            if(devname!=null) {
+                    if(doLog)
+                        Log.d(LOG_ID, meterIndex + " Try connection to " + device.getAddress()+ " "+devname);;
+                    }
+            }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mBluetoothGatt = device.connectGatt(app, autoConnect, this, BluetoothDevice.TRANSPORT_LE);
+            } else {
+                mBluetoothGatt = device.connectGatt(app, autoConnect, this);
+                }
+
+        if(doLog) {Log.i(LOG_ID,meterIndex+" after connectGatt ="+mBluetoothGatt);};
+        } catch (SecurityException se) {
+            var mess = se.getMessage();
+            mess = mess == null ? "" : mess;
+            String uit = ((Build.VERSION.SDK_INT > 30) ? Applic.getContext().getString(R.string.turn_on_nearby_devices_permission)  : mess) ;
+            Applic.Toaster(uit);
+
+            Log.stack(LOG_ID, meterIndex +" "+ "connectGatt", se);
+        } catch (Throwable e) {
+            Log.stack(LOG_ID, meterIndex +" "+ "connectGatt", e);
+
+            }
+    }
+
+    public synchronized void close() {
        if(doLog) {Log.i(LOG_ID,"close "+meterIndex);};
         var tmpgatt=mBluetoothGatt ;
         if (tmpgatt != null) {
@@ -839,7 +890,9 @@ public void disconnect() {
 void retrySatelliteSession() {
     if(satelliteMode) {
         satelliteSession=null;
-        satelliteSessionEndedAt=0L;
+        synchronized(this) {
+            linkSynced=linkBroughtNew=false;
+            }
         cancelPacedReconnect();
         if(mBluetoothGatt!=null) disconnect();
         else connectActiveDevice(0L);

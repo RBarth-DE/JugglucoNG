@@ -11,6 +11,7 @@ import tk.glucodata.data.journal.JournalEntryInput
 import tk.glucodata.data.journal.JournalEntrySource
 import tk.glucodata.data.journal.JournalEntryType
 import tk.glucodata.data.journal.JournalRepository
+import tk.glucodata.glucosemeter.MeterSyncPacing
 import tk.glucodata.glucosemeter.SatelliteMeterCredentials
 
 data class GlucoseMeterSnapshot(
@@ -35,6 +36,13 @@ object GlucoseMeterManager {
         if (SatelliteMeterCredentials.isValid(code)) {
             BluetoothGlucoseMeter.retrySatelliteSessions()
         }
+    }
+
+    fun recheckMinutes(): Int = MeterSyncPacing.minutes()
+
+    fun setRecheckMinutes(minutes: Int) {
+        MeterSyncPacing.setMinutes(minutes)
+        BluetoothGlucoseMeter.pacingChanged()
     }
 
     fun configuredMeters(): List<GlucoseMeterSnapshot> =

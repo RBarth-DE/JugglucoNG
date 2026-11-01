@@ -67,6 +67,9 @@ class VerioSession {
         queue(command(0x20, 0x02)) // meter time first, every reading needs it
     }
 
+    /** The meter has answered everything this session asked for. */
+    fun isDone(): Boolean = stage == Stage.DONE
+
     /** Next command to write, or null when there is nothing to send. */
     fun take(): ByteArray? = outbox.pollFirst()
 

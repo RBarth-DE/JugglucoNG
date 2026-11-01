@@ -921,6 +921,9 @@
     <string name="glucose_meters_none">Brak skonfigurowanych glukometrów</string>
     <string name="glucose_meters_none_desc">Znajdź pobliski glukometr, aby rozpocząć import pomiarów.</string>
     <string name="glucose_meters_nearby">Glukometry w pobliżu</string>
+    <string name="glucose_meter_recheck">Ponowne sprawdzenie glukometru po</string>
+    <string name="glucose_meter_recheck_now">Od razu</string>
+    <string name="glucose_meter_recheck_hint">Gdy ostatnia synchronizacja nie przyniosła nic nowego. Nowy pomiar może dotrzeć z takim opóźnieniem</string>
     <string name="glucose_meter_last_reading">Ostatni pomiar: %1$s</string>
     <string name="glucose_meter_no_readings">Nie zaimportowano jeszcze pomiarów</string>
     <string name="satellite_meter_code_missing">Glukometr Satellite: najpierw ustaw kod glukometru w ustawieniach glukometrów</string>

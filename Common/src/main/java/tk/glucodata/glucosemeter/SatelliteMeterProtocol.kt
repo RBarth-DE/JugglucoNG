@@ -17,23 +17,6 @@ object SatelliteMeterProtocol {
     val TX_UUID: UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
 
     const val MAX_BACKFILL_RECORDS = 10
-
-    /**
-     * The meter advertises around the clock and ends an idle link about 30 s after a session,
-     * so reconnecting as soon as it drops re-reads it twice a minute for as long as it is in
-     * range (#798). A new fingerstick therefore reaches us up to this long after it is taken.
-     */
-    const val RESYNC_INTERVAL_MS = 15L * 60L * 1_000L
-
-    /** How long to wait before reconnecting after a session that ended at [sessionEndedAtMs]. */
-    @JvmStatic
-    fun reconnectDelayMillis(sessionEndedAtMs: Long, nowMs: Long): Long {
-        if (sessionEndedAtMs <= 0L) return 0L
-        val elapsed = nowMs - sessionEndedAtMs
-        // A clock set backwards must not hold the meter off for longer than one interval.
-        if (elapsed < 0L) return RESYNC_INTERVAL_MS
-        return (RESYNC_INTERVAL_MS - elapsed).coerceAtLeast(0L)
-    }
     private const val EMPTY_SLOT = "rd000000000000000000"
     private const val CAPILLARY_TO_PLASMA = 1.12
     private const val MGDL_PER_MMOLL = 18.0182
