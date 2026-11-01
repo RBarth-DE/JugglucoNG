@@ -3263,4 +3263,11 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="nightscout_upload_sensor_start">Надсилати запуск сенсора</string>
     <string name="nightscout_upload_sensor_start_desc">Надсилати подію Sensor Start для кожного сенсора (вік, тип і серійний номер)</string>
     <string name="ican_calibration_marker">Калібрування (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">стабільно</string>
+    <string name="tts_trend_increasing">підвищується</string>
+    <string name="tts_trend_decreasing">знижується</string>
+    <string name="tts_trend_rising_quickly">швидко підвищується</string>
+    <string name="tts_trend_falling_quickly">швидко знижується</string>
 </resources>

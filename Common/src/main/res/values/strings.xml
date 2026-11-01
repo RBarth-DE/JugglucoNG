@@ -3436,4 +3436,11 @@ Pressing OK will generate a connection on this phone and display a QR code that 
         <item quantity="other">Included %d planned journal entries</item>
     </plurals>
     <string name="ican_calibration_marker">Calibration (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stable</string>
+    <string name="tts_trend_increasing">increasing</string>
+    <string name="tts_trend_decreasing">decreasing</string>
+    <string name="tts_trend_rising_quickly">rising quickly</string>
+    <string name="tts_trend_falling_quickly">falling quickly</string>
 </resources>

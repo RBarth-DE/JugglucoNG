@@ -3183,4 +3183,11 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="nightscout_upload_sensor_start">发送传感器启动事件</string>
     <string name="nightscout_upload_sensor_start_desc">为每个传感器发送 Sensor Start 事件（使用时长、类型和序列号）</string>
     <string name="ican_calibration_marker">校准 (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">平稳</string>
+    <string name="tts_trend_increasing">上升</string>
+    <string name="tts_trend_decreasing">下降</string>
+    <string name="tts_trend_rising_quickly">快速上升</string>
+    <string name="tts_trend_falling_quickly">快速下降</string>
 </resources>

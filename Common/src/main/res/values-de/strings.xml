@@ -3287,4 +3287,11 @@ Durch Drücken von „OK“ wird eine Verbindung auf diesem Telefon hergestellt 
     <string name="nightscout_upload_sensor_start">Sensorstart senden</string>
     <string name="nightscout_upload_sensor_start_desc">Für jeden Sensor ein Sensor-Start-Ereignis senden (Alter, Typ und Seriennummer)</string>
     <string name="ican_calibration_marker">Kalibrierung (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stabil</string>
+    <string name="tts_trend_increasing">steigend</string>
+    <string name="tts_trend_decreasing">sinkend</string>
+    <string name="tts_trend_rising_quickly">schnell steigend</string>
+    <string name="tts_trend_falling_quickly">schnell sinkend</string>
 </resources>

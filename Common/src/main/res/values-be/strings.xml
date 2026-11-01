@@ -3258,4 +3258,11 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="nightscout_upload_sensor_start">Адпраўляць запуск сенсара</string>
     <string name="nightscout_upload_sensor_start_desc">Адпраўляць падзею Sensor Start для кожнага сенсара (узрост, тып і серыйны нумар)</string>
     <string name="ican_calibration_marker">Каліброўка (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">стабільна</string>
+    <string name="tts_trend_increasing">павышаецца</string>
+    <string name="tts_trend_decreasing">зніжаецца</string>
+    <string name="tts_trend_rising_quickly">хутка павышаецца</string>
+    <string name="tts_trend_falling_quickly">хутка зніжаецца</string>
 </resources>
