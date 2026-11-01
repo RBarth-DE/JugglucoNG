@@ -3214,4 +3214,11 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
     <string name="nightscout_upload_sensor_start">Sensorstart verzenden</string>
     <string name="nightscout_upload_sensor_start_desc">Verzend per sensor een Sensor Start-gebeurtenis (leeftijd, type en serienummer)</string>
     <string name="ican_calibration_marker">Kalibratie (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stabiel</string>
+    <string name="tts_trend_increasing">stijgend</string>
+    <string name="tts_trend_decreasing">dalend</string>
+    <string name="tts_trend_rising_quickly">snel stijgend</string>
+    <string name="tts_trend_falling_quickly">snel dalend</string>
 </resources>

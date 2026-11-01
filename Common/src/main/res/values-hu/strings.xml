@@ -3240,4 +3240,11 @@ Az OK megnyomása létrehoz egy kapcsolatot ezen a telefonon, és megjelenít eg
     <string name="nightscout_upload_sensor_start">Szenzorindítás küldése</string>
     <string name="nightscout_upload_sensor_start_desc">Sensor Start esemény küldése szenzoronként (életkor, típus és sorozatszám)</string>
     <string name="ican_calibration_marker">Kalibráció (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stabil</string>
+    <string name="tts_trend_increasing">emelkedik</string>
+    <string name="tts_trend_decreasing">csökken</string>
+    <string name="tts_trend_rising_quickly">gyorsan emelkedik</string>
+    <string name="tts_trend_falling_quickly">gyorsan csökken</string>
 </resources>

@@ -3199,4 +3199,11 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="nightscout_upload_sensor_start">Sensör başlangıcını gönder</string>
     <string name="nightscout_upload_sensor_start_desc">Her sensör için Sensor Start olayı gönder (yaş, tür ve seri numarası)</string>
     <string name="ican_calibration_marker">Kalibrasyon (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">sabit</string>
+    <string name="tts_trend_increasing">yükseliyor</string>
+    <string name="tts_trend_decreasing">düşüyor</string>
+    <string name="tts_trend_rising_quickly">hızla yükseliyor</string>
+    <string name="tts_trend_falling_quickly">hızla düşüyor</string>
 </resources>

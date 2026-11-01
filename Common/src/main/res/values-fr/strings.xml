@@ -3178,4 +3178,11 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="nightscout_upload_sensor_start">Envoyer le démarrage du capteur</string>
     <string name="nightscout_upload_sensor_start_desc">Envoyer un événement Sensor Start par capteur (âge, type et numéro de série)</string>
     <string name="ican_calibration_marker">Étalonnage (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stable</string>
+    <string name="tts_trend_increasing">en hausse</string>
+    <string name="tts_trend_decreasing">en baisse</string>
+    <string name="tts_trend_rising_quickly">en hausse rapide</string>
+    <string name="tts_trend_falling_quickly">en baisse rapide</string>
 </resources>

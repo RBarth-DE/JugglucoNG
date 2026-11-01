@@ -2596,7 +2596,7 @@ public class Notify {
                 // newtalker(). Every other call site already guards; the alarm path did not.
                 final Talker alarmTalker = SuperGattCallback.talker;
                 if (current != null && alarmTalker != null) {
-                    alarmTalker.speak(current.getSpeechPrimaryStr(),
+                    alarmTalker.speak(GlucoseSpeech.format(Applic.app,current),
                             disturb ? ScanNfcV.audioattributes : notification_audio);
                 }
             }
@@ -2693,7 +2693,7 @@ public class Notify {
                                     Log.e(LOG_ID, "alarm speech: no talker, dropping utterance");
                                     return;
                                 }
-                                if (!delayedTalker.speak(closingSpeech.getSpeechPrimaryStr(),
+                                if (!delayedTalker.speak(GlucoseSpeech.format(Applic.app,closingSpeech),
                                         disturb ? ScanNfcV.audioattributes : notification_audio)) {
                                     Log.e(LOG_ID, "alarm speech: engine refused utterance");
                                 }

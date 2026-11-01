@@ -3225,4 +3225,11 @@
     <string name="nightscout_upload_sensor_start">Wysyłaj rozpoczęcie sensora</string>
     <string name="nightscout_upload_sensor_start_desc">Wysyłaj zdarzenie Sensor Start dla każdego sensora (wiek, typ i numer seryjny)</string>
     <string name="ican_calibration_marker">Kalibracja (F6)</string>
+
+    <!-- Spoken glucose trend; no arrow symbols for the TTS engine. -->
+    <string name="tts_trend_stable">stabilnie</string>
+    <string name="tts_trend_increasing">rośnie</string>
+    <string name="tts_trend_decreasing">spada</string>
+    <string name="tts_trend_rising_quickly">szybko rośnie</string>
+    <string name="tts_trend_falling_quickly">szybko spada</string>
 </resources>

@@ -74,6 +74,18 @@ class TalkerPlaybackTests {
         assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
     }
 
+    @Test fun trendPhraseIsQueuedTogetherAndOwnsFocusUntilTheWordsFinish() {
+        val message = GlucoseSpeech.format(Applic.app, "6.6", 1f)
+        assertTrue(talker.speak(message, true))
+        val engine = shadowOf(ShadowTextToSpeech.getLastTextToSpeechInstance())
+        assertEquals("6.6, increasing", engine.lastSpokenText)
+        val request = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        engine.utteranceProgressListener.onDone(LeadIn.ID)
+        assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
+        engine.utteranceProgressListener.onDone(wordsId())
+        assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
+    }
+
     @Test fun stoppingSpeechCannotAbandonAnAlarmThatStartedDuringIt() {
         assertTrue(talker.speak("5.8"))
         val speechFocus = shadowOf(audio).lastAudioFocusRequest

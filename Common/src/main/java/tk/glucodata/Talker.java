@@ -324,7 +324,7 @@ public static void testCurrentValue(Context context) {
     if(DontTalk)
         return;
     var current = CurrentDisplaySource.resolveCurrent(Notify.glucosetimeout);
-    var say=current!=null?current.getSpeechPrimaryStr():context.getString(R.string.tts_missed_readings);
+    var say=current!=null?GlucoseSpeech.format(context,current):context.getString(R.string.tts_missed_readings);
     var talk=SuperGattCallback.talker;
     if(talk!=null && talk.engineReady) {
         talk.setvalues();
@@ -1051,7 +1051,7 @@ private static View makeConfigView(MainActivity context, boolean overlayMode, Ru
         });
     test.setOnClickListener(v->  {
         var current = CurrentDisplaySource.resolveCurrent(Notify.glucosetimeout);
-        var say=current!=null?current.getSpeechPrimaryStr():context.getString(R.string.tts_missed_readings);
+        var say=current!=null?GlucoseSpeech.format(context,current):context.getString(R.string.tts_missed_readings);
         getvalues.run();
         if(istalking()) {
             var talk=SuperGattCallback.talker;
