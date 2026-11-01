@@ -3179,4 +3179,5 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     </plurals>
     <string name="nightscout_upload_sensor_start">发送传感器启动事件</string>
     <string name="nightscout_upload_sensor_start_desc">为每个传感器发送 Sensor Start 事件（使用时长、类型和序列号）</string>
+    <string name="ican_calibration_marker">校准 (F6)</string>
 </resources>

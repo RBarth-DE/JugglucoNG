@@ -3198,4 +3198,5 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     </plurals>
     <string name="nightscout_upload_sensor_start">Sensör başlangıcını gönder</string>
     <string name="nightscout_upload_sensor_start_desc">Her sensör için Sensor Start olayı gönder (yaş, tür ve seri numarası)</string>
+    <string name="ican_calibration_marker">Kalibrasyon (F6)</string>
 </resources>

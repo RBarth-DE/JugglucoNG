@@ -3432,4 +3432,5 @@ Pressing OK will generate a connection on this phone and display a QR code that 
         <item quantity="one">Included %d planned journal entry</item>
         <item quantity="other">Included %d planned journal entries</item>
     </plurals>
+    <string name="ican_calibration_marker">Calibration (F6)</string>
 </resources>
