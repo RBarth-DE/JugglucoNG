@@ -2580,9 +2580,11 @@ public class Notify {
         final boolean quietSuppressesVibration = AlertDeliveryPolicy.shouldSuppressVibration(quietWindow,
                 quietMode, quietBreakThrough);
 
+        // Stop the previous alarm before claiming focus for this one: its stop callback
+        // clears notifyfocus and releases the previous alarm's request.
+        stopalarm();
         notifyfocus = true;
         doTurnFocuson();
-        stopalarm();
         // final int[] curfilter={-1};
         final boolean glucosealarm = kind < 2 || kind > 4;
         if (!DontTalk) {
@@ -2676,6 +2678,9 @@ public class Notify {
                 if (vibrate) {
                     stopvibratealarm();
                 }
+                // The alarm has stopped. Any closing announcement owns separate ducking
+                // focus; its delayed callback must not release a newer alarm's focus.
+                doTurnFocusoff();
                 if (!DontTalk) {
                     if (glucosealarm && Natives.speakalarms() && !quietSilencesSound) {
                         final CurrentDisplaySource.Snapshot current = resolveNotificationCurrentSnapshot();
@@ -2689,28 +2694,20 @@ public class Notify {
                                         final Talker delayedTalker = SuperGattCallback.talker;
                                         if (delayedTalker == null) {
                                             Log.e(LOG_ID, "alarm speech: no talker, dropping utterance");
-                                            doTurnFocusoff();
                                             return;
                                         }
-                                        // Release focus if the engine refused the utterance too:
-                                        // a false return means nothing was queued, so no
-                                        // onDone/onError will arrive to release it for us.
-                                        // notifyfocus is false here, so the listener - not the
-                                        // alarm stop path - is what would otherwise own this.
+                                        // Talker owns and releases speech focus unless a newer
+                                        // alarm has taken ownership during the delay.
                                         if (!delayedTalker.speak(current.getSpeechPrimaryStr(),
                                                 disturb ? ScanNfcV.audioattributes : notification_audio)) {
                                             Log.e(LOG_ID, "alarm speech: engine refused utterance");
-                                            doTurnFocusoff();
                                         }
                                     },
                                     300, TimeUnit.MILLISECONDS);
-                        } else
-                            doTurnFocusoff();
-                    } else
-                        doTurnFocusoff();
+                        }
+                    }
                     // overwriteglucose();
-                } else
-                    doTurnFocusoff();
+                }
 
                 if (glucosealarm)
                     overwriteglucose(kind);

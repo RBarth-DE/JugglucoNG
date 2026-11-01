@@ -50,14 +50,9 @@ import static tk.glucodata.util.getbutton;
 import static tk.glucodata.util.getcheckbox;
 import static tk.glucodata.util.getlabel;
 import static tk.glucodata.util.getlocale;
-import static tk.glucodata.Notify.doTurnFocuson;
-import static tk.glucodata.Notify.doTurnFocusoff;
-import static tk.glucodata.Notify.audiofocusrequest;
 import android.app.Activity;
 import android.content.Context;
 import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
-import android.media.AudioManager;
 import android.os.Build;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -457,7 +452,6 @@ if(!DontTalk) {
           });
     engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
 
- //  AudioFocusRequest audiofocusrequest = (android.os.Build.VERSION.SDK_INT <26)?null:new AudioFocusRequest.Builder( AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes( notification_audio ).build();
         @Override
         public void onDone(String utteranceId) {
             if(doLog) {Log.i(LOG_ID,"onDone "+utteranceId);};
@@ -515,33 +509,6 @@ if(!DontTalk) {
         }
    }
 
-// Fraction of the stream's max volume that is the minimum allowed for TTS output.
-// Prevents silence when the user (or system) drives the stream to zero.
-private static final float MIN_TTS_VOLUME_FRACTION = 0.25f;
-
-private static int usageToStreamType(int usage) {
-    switch (usage) {
-        case AudioAttributes.USAGE_ALARM:  return AudioManager.STREAM_ALARM;
-        case AudioAttributes.USAGE_MEDIA:  return AudioManager.STREAM_MUSIC;
-        default:                           return AudioManager.STREAM_NOTIFICATION;
-    }
-}
-
-private static void ensureMinStreamVolume() {
-    try {
-        AudioManager am = (AudioManager) Applic.app.getSystemService(Context.AUDIO_SERVICE);
-        if (am == null) return;
-        final int stream = usageToStreamType(Natives.getSoundType());
-        final int maxVol = am.getStreamMaxVolume(stream);
-        final int minVol = Math.max(1, Math.round(maxVol * MIN_TTS_VOLUME_FRACTION));
-        if (am.getStreamVolume(stream) < minVol) {
-            am.setStreamVolume(stream, minVol, 0);
-        }
-    } catch (Throwable th) {
-        Log.stack(LOG_ID, "ensureMinStreamVolume", th);
-    }
-}
-
 /**
  * Hand an utterance to the engine.
  *
@@ -563,6 +530,10 @@ public boolean speak(String message) {
  * The words then follow a short lead-in, see {@link LeadIn}.
  */
 boolean speak(String message,boolean chime) {
+    return speak(message,notification_audio,chime);
+    }
+
+private boolean queueSpeech(String message,boolean chime) {
     if(!DontTalk) {
         final boolean ownsFocus=!notifyfocus;
         // Unique, so a callback for an earlier utterance of the same value cannot release this
@@ -572,7 +543,6 @@ boolean speak(String message,boolean chime) {
         try {
             // One read: destruct() nulls the field from another thread, and this makes three calls.
             final TextToSpeech gine=engine;
-            ensureMinStreamVolume();
             final int speakResult;
             // An utterance is now several queue calls. Unlocked, a second speak() could flush
             // between this one's lead-in and its words, and these older words would then be
@@ -626,16 +596,7 @@ boolean speak(String message,boolean chime) {
 private final Object queueLock=new Object();
 
 /** Static, as the focus it tracks is: a replaced Talker's late callbacks must not release it. */
-private static final SpeechFocus focus=new SpeechFocus(new SpeechFocus.Audio() {
-    @Override
-    public void request() {
-        doTurnFocuson();
-        }
-    @Override
-    public void abandon() {
-        doTurnFocusoff();
-        }
-    });
+private static final SpeechFocus focus=new SpeechFocus(new SpeechAudioFocus());
 private static final java.util.concurrent.atomic.AtomicLong utteranceSeq=new java.util.concurrent.atomic.AtomicLong();
 /** The words this Talker last claimed focus for, released by destruct(). */
 private volatile String lastWordsId;
@@ -701,13 +662,13 @@ boolean speak(String message, AudioAttributes attr, boolean chime) {
     final boolean override=android.os.Build.VERSION.SDK_INT >= minandroid && attr!=notification_audio;
     boolean spoken=false;
     // Locked so another speak() cannot queue under these attributes, or restore them, between
-    // the override and this utterance. speak(message,chime) takes the same lock again.
+    // the override and this utterance. queueSpeech() takes the same lock again.
     synchronized(queueLock) {
     try {
-        if(override) {
-            gine.setAudioAttributes(attr);
-            }
-        spoken=speak(message,chime);
+        // Refresh even the default attributes: the Media setting can change while this
+        // engine stays alive. Otherwise it keeps speaking on its old stream until restart.
+        gine.setAudioAttributes(attr);
+        spoken=queueSpeech(message,chime);
         }
     catch(Throwable th) {
         Log.stack(LOG_ID,"speak(message,attr)",th);

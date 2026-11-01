@@ -5,7 +5,7 @@ package tk.glucodata;
  * can be unit tested.
  *
  * <p>{@link Talker} takes focus before it queues an utterance's lead-in, so focus is now held
- * while no words are playing yet. The focus itself is one global flag in {@link Notify}, and the
+ * while no words are playing yet. Speech has its own focus request, separate from alarms, and the
  * engine's progress callbacks arrive late and on any thread. Releasing on every callback would
  * let the previous utterance's onDone, or its onStop when the next one flushes it, drop the focus
  * the next one has just taken. So only the utterance that holds focus releases it.
