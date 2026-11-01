@@ -49,7 +49,6 @@ import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
 
@@ -146,9 +145,6 @@ private boolean satelliteMode=false;
 private boolean linkAnswered=false;
 private boolean linkFailed=false;
 private boolean linkBroughtNew=false;
-private long dialStartedMs=0L;
-private long linkConnectedMs=0L;
-private boolean linkConnectedQuickly=false;
 private final MeterLinkPacer pacer=new MeterLinkPacer();
 private ScheduledFuture<?> pacedReconnect;
 // Bumped by every cancel, so a paced task the executor already started sees it is stale.
@@ -157,12 +153,8 @@ private synchronized void markLinkAnswered() { linkAnswered=true; }
 private synchronized void markLinkFailed() { linkAnswered=linkFailed=true; }
 private synchronized void markLinkBroughtNew() { linkBroughtNew=true; }
 private synchronized void resetLink() { linkAnswered=linkFailed=linkBroughtNew=false; }
-private synchronized void noteDialling() { dialStartedMs=SystemClock.elapsedRealtime(); }
-private synchronized void noteConnected() {
-    resetLink();
-    linkConnectedMs=SystemClock.elapsedRealtime();
-    linkConnectedQuickly=dialStartedMs!=0L && linkConnectedMs-dialStartedMs<=MeterSyncPacing.QUICK_CONNECT_MS;
-}
+/** The last link found a meter that never sleeps (only the Satellite, so far). */
+boolean staysOn() { return satelliteMode; }
 private synchronized void cancelPacedReconnect() {
     ++pacedTicket;
     final var pending=pacedReconnect;
@@ -175,7 +167,7 @@ private synchronized long pacedReconnectDelay() {
         :linkAnswered?MeterLinkOutcome.NOTHING_NEW
         :MeterLinkOutcome.UNANSWERED;
     resetLink();
-    return pacer.linkEnded(outcome,linkConnectedMs,linkConnectedQuickly,SystemClock.elapsedRealtime(),MeterSyncPacing.minutes());
+    return pacer.linkEnded(outcome,staysOn(),MeterSyncPacing.minutes());
 }
 private synchronized void schedulePacedReconnect(long wait) {
     cancelPacedReconnect();
@@ -555,7 +547,7 @@ boolean connected=false;
          // its job; go back to the battery-friendly whitelist reconnect for whenever
          // this link drops later.
          autoConnect=true;
-         noteConnected();
+         resetLink();
          // Connected some other way while a paced reconnect waited.
          cancelPacedReconnect();
         if(stop) {
@@ -600,14 +592,12 @@ boolean connected=false;
                      if(autoConnect)  {
                         final long wait=pacedReconnectDelay();
                         if(wait>0L) {
-                            if(doLog) Log.i(LOG_ID,meterIndex+" awake with nothing new, reconnect in "+wait/1000+"s");
+                            if(doLog) Log.i(LOG_ID,meterIndex+" stays on, nothing new, reconnect in "+wait/1000+"s");
                             close();
                             schedulePacedReconnect(wait);
                             }
-                        else if(useConnect) {
-                            noteDialling();
+                        else if(useConnect)
                             bluetoothGatt.connect();
-                            }
                         }
                     else {
                         // The one direct attempt a fresh sighting earns did not land.
@@ -855,7 +845,6 @@ private void setCareSenseTime(BluetoothGatt bluetoothGatt) {
                     }
             }
         try {
-            noteDialling();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 mBluetoothGatt = device.connectGatt(app, autoConnect, this, BluetoothDevice.TRANSPORT_LE);
             } else {

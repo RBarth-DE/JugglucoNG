@@ -870,7 +870,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_nearby">Mätare i närheten</string>
     <string name="glucose_meter_recheck">Kontrollera mätaren igen efter</string>
     <string name="glucose_meter_recheck_now">Direkt</string>
-    <string name="glucose_meter_recheck_hint">Bara för en mätare som förblir påslagen utan något nytt. En ny mätning kan komma så här mycket senare</string>
+    <string name="glucose_meter_recheck_hint">För mätare som förblir påslagna, som Satellite. En ny mätning kan komma så här mycket senare</string>
     <string name="glucose_meter_last_reading">Senaste mätning: %1$s</string>
     <string name="glucose_meter_no_readings">Inga mätvärden har importerats ännu</string>
     <string name="satellite_meter_code_missing">Satellite-mätare: ange först mätarkoden i inställningarna för blodsockermätare</string>

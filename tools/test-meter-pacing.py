@@ -27,13 +27,13 @@ def method(source, signature):
 methods = '\n'.join(method(gatt, signature) for signature in [
     'private synchronized void markLinkAnswered(', 'private synchronized void markLinkFailed(',
     'private synchronized void markLinkBroughtNew(', 'private synchronized void resetLink(',
-    'private synchronized void noteDialling(', 'private synchronized void noteConnected(',
+    'boolean staysOn(',
     'private synchronized void cancelPacedReconnect(', 'private synchronized long pacedReconnectDelay(',
     'private synchronized void schedulePacedReconnect(', 'private synchronized void runPacedReconnect(',
     'synchronized void pacingChanged(',
 ])
 # The pacing rule itself is covered by MeterSyncPacingTests; here the pacer is a recording fake.
-assert 'class MeterLinkPacer' in pacing and 'QUICK_CONNECT_MS = 60_000L' in pacing
+assert 'class MeterLinkPacer' in pacing and 'fun linkEnded(outcome: MeterLinkOutcome, staysOn: Boolean, minutes: Int)' in pacing
 
 java = r'''
 package tk.glucodata;
@@ -44,15 +44,13 @@ public class GlucoseMeterGatt {
     static final boolean doLog=false;
     enum MeterLinkOutcome { UNANSWERED, NEW_READINGS, NOTHING_NEW, FAILED }
     static class MeterSyncPacing {
-        static final long QUICK_CONNECT_MS=60_000L;
         static int minutes=5;
         static int minutes(){return minutes;}
     }
     static class MeterLinkPacer {
-        MeterLinkOutcome outcome; long connectedAt,endedAt; boolean quick; int minutes; long nextWait;
-        long linkEnded(MeterLinkOutcome o,long c,boolean q,long e,int m){outcome=o;connectedAt=c;quick=q;endedAt=e;minutes=m;return nextWait;}
+        MeterLinkOutcome outcome; boolean staysOn; int minutes; long nextWait;
+        long linkEnded(MeterLinkOutcome o,boolean s,int m){outcome=o;staysOn=s;minutes=m;return nextWait;}
     }
-    static class SystemClock { static long elapsedRealtime(){return Applic.scheduler.now;} }
     static class Applic { static Scheduler scheduler=new Scheduler(); }
     static class Scheduler {
         long now=1_000_000L; List<Job> jobs=new ArrayList<>();
@@ -74,9 +72,7 @@ public class GlucoseMeterGatt {
     private boolean linkAnswered=false;
     private boolean linkFailed=false;
     private boolean linkBroughtNew=false;
-    private long dialStartedMs=0L;
-    private long linkConnectedMs=0L;
-    private boolean linkConnectedQuickly=false;
+    private boolean satelliteMode=false;
     private final MeterLinkPacer pacer=new MeterLinkPacer();
     private ScheduledFuture<?> pacedReconnect;
     private long pacedTicket=0L;
@@ -91,16 +87,11 @@ public class GlucoseMeterGatt {
         m.markLinkFailed();m.pacedReconnectDelay();check(m.pacer.outcome==MeterLinkOutcome.FAILED,"failed sync not FAILED");
         m.markLinkFailed();m.markLinkBroughtNew();m.pacedReconnectDelay();
         check(m.pacer.outcome==MeterLinkOutcome.NEW_READINGS,"stored readings hidden by a later error");
-        m.markLinkAnswered();m.noteConnected();m.pacedReconnectDelay();
-        check(m.pacer.outcome==MeterLinkOutcome.UNANSWERED,"a new link kept the previous link's answer");
         check(m.pacer.minutes==5,"interval not passed through");
 
-        // Connected within a minute of dialling: the meter was awake. Later, or never dialled: asleep.
-        m=fresh();m.noteConnected();check(!m.linkConnectedQuickly,"undialled link counted as quick");
-        m.noteDialling();Applic.scheduler.advance(60_000);m.noteConnected();check(m.linkConnectedQuickly,"60 s connect not quick");
-        m.noteDialling();Applic.scheduler.advance(60_001);m.noteConnected();check(!m.linkConnectedQuickly,"slow connect counted as quick");
-        long at=m.linkConnectedMs;Applic.scheduler.advance(9_000);m.markLinkAnswered();m.pacedReconnectDelay();
-        check(m.pacer.connectedAt==at && m.pacer.endedAt==at+9_000,"link times not passed through");
+        // Whether the meter stays on comes from the link (the Satellite service), not from timing.
+        m=fresh();m.markLinkAnswered();m.pacedReconnectDelay();check(!m.pacer.staysOn,"an unknown meter counted as staying on");
+        m.satelliteMode=true;m.markLinkAnswered();m.pacedReconnectDelay();check(m.pacer.staysOn,"a Satellite link not counted as staying on");
 
         // The pacer's wait is scheduled, then dials once.
         m=fresh();m.pacer.nextWait=300_000L;check(m.pacedReconnectDelay()==300_000L,"pacer wait dropped");
@@ -125,7 +116,7 @@ public class GlucoseMeterGatt {
         m=fresh();m.schedulePacedReconnect(1_800_000L);m.pacingChanged();check(m.opened==1,"interval change left meter waiting");
         Applic.scheduler.advance(1_800_000);check(m.opened==1,"old paced task dialled after interval change");
         m=fresh();m.pacingChanged();check(m.opened==0,"interval change dialled a meter that was not waiting");
-        System.out.println("PASS: link outcomes, connect timing, paced reconnect, stale and superseded tasks, live links, removal, interval change");
+        System.out.println("PASS: link outcomes, stays-on from the link, paced reconnect, stale and superseded tasks, live links, removal, interval change");
     }
 }
 '''

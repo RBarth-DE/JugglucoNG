@@ -8,70 +8,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MeterSyncPacingTests {
-    /** Links back to back, each [linkMs] long, dialled [gapMs] after the last one ended. */
-    private class Meter(val pacer: MeterLinkPacer = MeterLinkPacer(), var now: Long = 1_000_000L) {
-        fun link(
-            outcome: MeterLinkOutcome,
-            quick: Boolean = true,
-            linkMs: Long = 10_000L,
-            minutes: Int = 5,
-        ): Long {
-            val connectedAt = now
-            now += linkMs
-            val wait = pacer.linkEnded(outcome, connectedAt, quick, now, minutes)
-            now += maxOf(wait, 23_000L)
-            return wait
+    private val everyOutcome = MeterLinkOutcome.values().toList()
+
+    @Test
+    fun aMeterThatSleepsIsNeverHeldBack() {
+        // Contour and the rest: whatever the link brought, however long it kept answering.
+        val pacer = MeterLinkPacer()
+        repeat(20) {
+            for (outcome in everyOutcome) assertEquals(outcome.name, 0L, pacer.linkEnded(outcome, false, 5))
         }
     }
 
     @Test
-    fun aMeterThatStaysAwakeIsPacedOnceItHasBeenAwakeTwoMinutes() {
-        // Satellite in #798: back within a second of every link, nothing new, every 33 s.
-        val meter = Meter()
-        val waits = List(8) { meter.link(MeterLinkOutcome.NOTHING_NEW) }
-        assertEquals(listOf(0L, 0L, 0L, 0L), waits.take(4))
-        assertEquals("then one link per interval, for as long as it stays awake", List(4) { 300_000L }, waits.drop(4))
+    fun aMeterThatStaysOnWaitsAfterNothingNew() {
+        // Satellite in #798: read once per interval instead of every 33 s.
+        val pacer = MeterLinkPacer()
+        repeat(5) { assertEquals(300_000L, pacer.linkEnded(MeterLinkOutcome.NOTHING_NEW, true, 5)) }
+        assertEquals(900_000L, pacer.linkEnded(MeterLinkOutcome.NOTHING_NEW, true, 15))
+        // New readings, or a link that dropped before the meter answered: straight back.
+        assertEquals(0L, pacer.linkEnded(MeterLinkOutcome.NEW_READINGS, true, 5))
+        assertEquals(0L, pacer.linkEnded(MeterLinkOutcome.UNANSWERED, true, 5))
     }
 
     @Test
-    fun aMeterThatSleepsBetweenMeasurementsIsNeverHeldBack() {
-        // Contour: a fingerstick, the transfer, a minute of answering with nothing new, asleep.
-        val meter = Meter()
-        assertEquals(0L, meter.link(MeterLinkOutcome.NEW_READINGS))
-        assertEquals(0L, meter.link(MeterLinkOutcome.NOTHING_NEW))
-        assertEquals(0L, meter.link(MeterLinkOutcome.NOTHING_NEW))
-        // The next link waits for the meter to wake up, so it comes slowly: a fresh start.
-        meter.now += 3_600_000L
-        assertEquals(0L, meter.link(MeterLinkOutcome.NOTHING_NEW, quick = false))
-        assertEquals(0L, meter.link(MeterLinkOutcome.NOTHING_NEW))
-        assertEquals(0L, meter.link(MeterLinkOutcome.NEW_READINGS))
-    }
-
-    @Test
-    fun newReadingsOrAnUnansweredLinkEndTheAwakeRun() {
-        for (breaker in listOf(MeterLinkOutcome.NEW_READINGS, MeterLinkOutcome.UNANSWERED)) {
-            val meter = Meter()
-            repeat(4) { meter.link(MeterLinkOutcome.NOTHING_NEW) }
-            assertEquals(300_000L, meter.link(MeterLinkOutcome.NOTHING_NEW))
-            assertEquals(0L, meter.link(breaker))
-            assertEquals("$breaker restarts the two minutes", 0L, meter.link(MeterLinkOutcome.NOTHING_NEW))
+    fun aFailureAloneIsRetriedAtOnceButARepeatingOneWaits() {
+        val pacer = MeterLinkPacer()
+        // A failure right after a run of empty syncs is still isolated.
+        repeat(5) { pacer.linkEnded(MeterLinkOutcome.NOTHING_NEW, true, 5) }
+        assertEquals(0L, pacer.linkEnded(MeterLinkOutcome.FAILED, true, 5))
+        // A wrong Satellite code fails every link: not redialled and toasted twice a minute.
+        assertEquals(300_000L, pacer.linkEnded(MeterLinkOutcome.FAILED, true, 5))
+        assertEquals(300_000L, pacer.linkEnded(MeterLinkOutcome.FAILED, true, 5))
+        // Anything else in between makes the next failure isolated again.
+        for (breaker in listOf(MeterLinkOutcome.NOTHING_NEW, MeterLinkOutcome.NEW_READINGS, MeterLinkOutcome.UNANSWERED)) {
+            pacer.linkEnded(breaker, true, 5)
+            assertEquals(breaker.name, 0L, pacer.linkEnded(MeterLinkOutcome.FAILED, true, 5))
+            pacer.linkEnded(MeterLinkOutcome.FAILED, true, 5)
         }
-    }
-
-    @Test
-    fun aFailureNeverDelaysOnItsOwnButARepeatingOneIsPaced() {
-        val meter = Meter()
-        assertEquals(0L, meter.link(MeterLinkOutcome.FAILED))
-        assertEquals(0L, meter.link(MeterLinkOutcome.FAILED))
-        // A wrong Satellite code fails every link: not redialled twice a minute forever.
-        repeat(2) { meter.link(MeterLinkOutcome.FAILED) }
-        assertEquals(300_000L, meter.link(MeterLinkOutcome.FAILED))
+        // Failures on a sleeping meter never wait.
+        val sleeper = MeterLinkPacer()
+        repeat(5) { assertEquals(0L, sleeper.linkEnded(MeterLinkOutcome.FAILED, false, 5)) }
     }
 
     @Test
     fun intervalZeroReconnectsAtOnceAsBefore() {
-        val meter = Meter()
-        repeat(10) { assertEquals(0L, meter.link(MeterLinkOutcome.NOTHING_NEW, minutes = 0)) }
+        val pacer = MeterLinkPacer()
+        repeat(3) { for (outcome in everyOutcome) assertEquals(0L, pacer.linkEnded(outcome, true, 0)) }
         assertTrue(MeterSyncPacing.DEFAULT_MINUTES in MeterSyncPacing.CHOICES_MINUTES)
     }
 

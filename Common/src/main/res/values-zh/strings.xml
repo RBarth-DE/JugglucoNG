@@ -882,7 +882,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_nearby">附近的血糖仪</string>
     <string name="glucose_meter_recheck">再次检查血糖仪的间隔</string>
     <string name="glucose_meter_recheck_now">立即</string>
-    <string name="glucose_meter_recheck_hint">仅适用于一直开着且没有新数据的血糖仪。新的测量结果最多会晚这么久到达</string>
+    <string name="glucose_meter_recheck_hint">适用于一直开着的血糖仪，例如 Satellite。新的测量结果最多会晚这么久到达</string>
     <string name="glucose_meter_last_reading">最近读数：%1$s</string>
     <string name="glucose_meter_no_readings">尚未导入读数</string>
     <string name="satellite_meter_code_missing">Satellite 血糖仪：请先在血糖仪设置中填写血糖仪代码</string>

@@ -371,7 +371,8 @@ fun GlucoseMeterSettingsScreen(navController: NavController) {
                 }
             }
 
-            if (meters.isNotEmpty()) {
+            // Only a meter that never sleeps waits between checks, so the choice shows with one.
+            if (meters.any { it.staysOn }) {
                 item("recheck") {
                     Column {
                         SectionLabel(stringResource(R.string.glucose_meter_recheck))
