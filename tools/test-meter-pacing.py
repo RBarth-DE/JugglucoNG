@@ -25,13 +25,15 @@ def method(source, signature):
 
 
 methods = '\n'.join(method(gatt, signature) for signature in [
-    'private synchronized void markLinkSynced(', 'private synchronized void markLinkBroughtNew(',
+    'private synchronized void markLinkAnswered(', 'private synchronized void markLinkFailed(',
+    'private synchronized void markLinkBroughtNew(', 'private synchronized void resetLink(',
+    'private synchronized void noteDialling(', 'private synchronized void noteConnected(',
     'private synchronized void cancelPacedReconnect(', 'private synchronized long pacedReconnectDelay(',
     'private synchronized void schedulePacedReconnect(', 'private synchronized void runPacedReconnect(',
     'synchronized void pacingChanged(',
 ])
-# The Kotlin policy is one expression; keep the test honest about its rule.
-assert 'if (synced && !broughtNew && minutes > 0) minutes * 60_000L else 0L' in pacing
+# The pacing rule itself is covered by MeterSyncPacingTests; here the pacer is a recording fake.
+assert 'class MeterLinkPacer' in pacing and 'QUICK_CONNECT_MS = 60_000L' in pacing
 
 java = r'''
 package tk.glucodata;
@@ -40,16 +42,20 @@ import java.util.concurrent.*;
 
 public class GlucoseMeterGatt {
     static final boolean doLog=false;
+    enum MeterLinkOutcome { UNANSWERED, NEW_READINGS, NOTHING_NEW, FAILED }
     static class MeterSyncPacing {
+        static final long QUICK_CONNECT_MS=60_000L;
         static int minutes=5;
         static int minutes(){return minutes;}
-        static long reconnectDelayMillis(boolean synced,boolean broughtNew,int minutes){
-            return synced&&!broughtNew&&minutes>0?minutes*60_000L:0L;
-        }
     }
+    static class MeterLinkPacer {
+        MeterLinkOutcome outcome; long connectedAt,endedAt; boolean quick; int minutes; long nextWait;
+        long linkEnded(MeterLinkOutcome o,long c,boolean q,long e,int m){outcome=o;connectedAt=c;quick=q;endedAt=e;minutes=m;return nextWait;}
+    }
+    static class SystemClock { static long elapsedRealtime(){return Applic.scheduler.now;} }
     static class Applic { static Scheduler scheduler=new Scheduler(); }
     static class Scheduler {
-        long now; List<Job> jobs=new ArrayList<>();
+        long now=1_000_000L; List<Job> jobs=new ArrayList<>();
         ScheduledFuture<?> schedule(Runnable r,long delay,TimeUnit unit){Job j=new Job(r,now+unit.toMillis(delay));jobs.add(j);return j;}
         void advance(long delta){long target=now+delta;while(true){Job j=jobs.stream().filter(x->!x.done&&x.at<=target).min(Comparator.comparingLong(x->x.at)).orElse(null);if(j==null)break;now=j.at;j.fire();}now=target;}
         Job last(){return jobs.get(jobs.size()-1);}
@@ -65,26 +71,41 @@ public class GlucoseMeterGatt {
     }
     boolean stop; Object mBluetoothGatt; int opened;
     void openGatt(){opened++;mBluetoothGatt=new Object();}
-    private boolean linkSynced=false;
+    private boolean linkAnswered=false;
+    private boolean linkFailed=false;
     private boolean linkBroughtNew=false;
+    private long dialStartedMs=0L;
+    private long linkConnectedMs=0L;
+    private boolean linkConnectedQuickly=false;
+    private final MeterLinkPacer pacer=new MeterLinkPacer();
     private ScheduledFuture<?> pacedReconnect;
     private long pacedTicket=0L;
 ''' + methods + r'''
     static void check(boolean b,String message){if(!b)throw new AssertionError(message);}
     static GlucoseMeterGatt fresh(){Applic.scheduler=new Scheduler();MeterSyncPacing.minutes=5;return new GlucoseMeterGatt();}
     public static void main(String[] args){
-        // A sync with nothing new waits the interval, then dials once.
-        GlucoseMeterGatt m=fresh();m.markLinkSynced();
-        check(m.pacedReconnectDelay()==300_000L,"empty sync not paced");
+        // Each link reaches the pacer as one outcome, and the next link starts clean.
+        GlucoseMeterGatt m=fresh();m.markLinkAnswered();m.pacedReconnectDelay();
+        check(m.pacer.outcome==MeterLinkOutcome.NOTHING_NEW,"clean empty sync not NOTHING_NEW");
+        m.pacedReconnectDelay();check(m.pacer.outcome==MeterLinkOutcome.UNANSWERED,"old sync leaked into a later link");
+        m.markLinkFailed();m.pacedReconnectDelay();check(m.pacer.outcome==MeterLinkOutcome.FAILED,"failed sync not FAILED");
+        m.markLinkFailed();m.markLinkBroughtNew();m.pacedReconnectDelay();
+        check(m.pacer.outcome==MeterLinkOutcome.NEW_READINGS,"stored readings hidden by a later error");
+        m.markLinkAnswered();m.noteConnected();m.pacedReconnectDelay();
+        check(m.pacer.outcome==MeterLinkOutcome.UNANSWERED,"a new link kept the previous link's answer");
+        check(m.pacer.minutes==5,"interval not passed through");
+
+        // Connected within a minute of dialling: the meter was awake. Later, or never dialled: asleep.
+        m=fresh();m.noteConnected();check(!m.linkConnectedQuickly,"undialled link counted as quick");
+        m.noteDialling();Applic.scheduler.advance(60_000);m.noteConnected();check(m.linkConnectedQuickly,"60 s connect not quick");
+        m.noteDialling();Applic.scheduler.advance(60_001);m.noteConnected();check(!m.linkConnectedQuickly,"slow connect counted as quick");
+        long at=m.linkConnectedMs;Applic.scheduler.advance(9_000);m.markLinkAnswered();m.pacedReconnectDelay();
+        check(m.pacer.connectedAt==at && m.pacer.endedAt==at+9_000,"link times not passed through");
+
+        // The pacer's wait is scheduled, then dials once.
+        m=fresh();m.pacer.nextWait=300_000L;check(m.pacedReconnectDelay()==300_000L,"pacer wait dropped");
         m.schedulePacedReconnect(300_000L);Applic.scheduler.advance(299_999);check(m.opened==0,"paced reconnect early");
         Applic.scheduler.advance(1);check(m.opened==1,"paced reconnect missing");
-
-        // New readings, no completed sync, or the interval set to 0: reconnect at once, as before.
-        m=fresh();m.markLinkSynced();m.markLinkBroughtNew();check(m.pacedReconnectDelay()==0L,"new readings were paced");
-        m=fresh();check(m.pacedReconnectDelay()==0L,"link without a sync was paced");
-        m=fresh();MeterSyncPacing.minutes=0;m.markLinkSynced();check(m.pacedReconnectDelay()==0L,"interval 0 still paced");
-        // The verdict belongs to one link: the next one starts clean.
-        m=fresh();m.markLinkSynced();m.pacedReconnectDelay();check(m.pacedReconnectDelay()==0L,"old sync paced a later link");
 
         // Review #800: a task the executor already started must not act once it is cancelled.
         m=fresh();m.schedulePacedReconnect(300_000L);Job started=Applic.scheduler.last();
@@ -104,7 +125,7 @@ public class GlucoseMeterGatt {
         m=fresh();m.schedulePacedReconnect(1_800_000L);m.pacingChanged();check(m.opened==1,"interval change left meter waiting");
         Applic.scheduler.advance(1_800_000);check(m.opened==1,"old paced task dialled after interval change");
         m=fresh();m.pacingChanged();check(m.opened==0,"interval change dialled a meter that was not waiting");
-        System.out.println("PASS: meter reconnect pacing, stale and superseded tasks, live links, removal, interval change");
+        System.out.println("PASS: link outcomes, connect timing, paced reconnect, stale and superseded tasks, live links, removal, interval change");
     }
 }
 '''

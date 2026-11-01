@@ -35,6 +35,7 @@ class VerioSession {
     private val pendingReadings = ArrayList<Reading>()
     private var stage = Stage.IDLE
     private var begun = false
+    private var failed = false
     private var meterTimeOffset = 0L
     private var haveMeterTime = false
     private var highestRecordNumber = -1
@@ -50,6 +51,7 @@ class VerioSession {
         pendingReadings.clear()
         stage = Stage.IDLE
         begun = false
+        failed = false
         meterTimeOffset = 0L
         haveMeterTime = false
         highestRecordNumber = -1
@@ -67,8 +69,11 @@ class VerioSession {
         queue(command(0x20, 0x02)) // meter time first, every reading needs it
     }
 
-    /** The meter has answered everything this session asked for. */
+    /** The session is over: the meter answered everything it asked for, or it gave up. */
     fun isDone(): Boolean = stage == Stage.DONE
+
+    /** It gave up on a malformed or refused answer, so the meter may still hold newer records. */
+    fun isFailed(): Boolean = failed
 
     /** Next command to write, or null when there is nothing to send. */
     fun take(): ByteArray? = outbox.pollFirst()
@@ -165,6 +170,7 @@ class VerioSession {
         if (reason != null) Log.e(TAG, reason)
         queue(byteArrayOf(0x81.toByte()))
         stage = Stage.DONE
+        failed = true
     }
 
     private fun handleData(message: ByteArray, alreadyHave: Int) {

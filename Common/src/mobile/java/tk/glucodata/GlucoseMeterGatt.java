@@ -49,6 +49,7 @@ import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
 
@@ -56,6 +57,8 @@ import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import tk.glucodata.glucosemeter.MeterLinkOutcome;
+import tk.glucodata.glucosemeter.MeterLinkPacer;
 import tk.glucodata.glucosemeter.MeterSyncPacing;
 import tk.glucodata.glucosemeter.SatelliteMeterCredentials;
 import tk.glucodata.glucosemeter.SatelliteMeterProtocol;
@@ -138,15 +141,28 @@ private BluetoothGattCharacteristic SatelliteTxChar;
 private SatelliteMeterSession satelliteSession;
 private boolean satelliteMode=false;
 
-// Reconnect pacing (MeterSyncPacing), all guarded by this. A link counts as synced once the
-// meter has answered the record request, whether or not it had anything new.
-private boolean linkSynced=false;
+// Reconnect pacing (MeterSyncPacing), all guarded by this. A link is answered once the meter
+// has replied to the record request, cleanly (it may have had nothing new) or with an error.
+private boolean linkAnswered=false;
+private boolean linkFailed=false;
 private boolean linkBroughtNew=false;
+private long dialStartedMs=0L;
+private long linkConnectedMs=0L;
+private boolean linkConnectedQuickly=false;
+private final MeterLinkPacer pacer=new MeterLinkPacer();
 private ScheduledFuture<?> pacedReconnect;
 // Bumped by every cancel, so a paced task the executor already started sees it is stale.
 private long pacedTicket=0L;
-private synchronized void markLinkSynced() { linkSynced=true; }
+private synchronized void markLinkAnswered() { linkAnswered=true; }
+private synchronized void markLinkFailed() { linkAnswered=linkFailed=true; }
 private synchronized void markLinkBroughtNew() { linkBroughtNew=true; }
+private synchronized void resetLink() { linkAnswered=linkFailed=linkBroughtNew=false; }
+private synchronized void noteDialling() { dialStartedMs=SystemClock.elapsedRealtime(); }
+private synchronized void noteConnected() {
+    resetLink();
+    linkConnectedMs=SystemClock.elapsedRealtime();
+    linkConnectedQuickly=dialStartedMs!=0L && linkConnectedMs-dialStartedMs<=MeterSyncPacing.QUICK_CONNECT_MS;
+}
 private synchronized void cancelPacedReconnect() {
     ++pacedTicket;
     final var pending=pacedReconnect;
@@ -154,9 +170,12 @@ private synchronized void cancelPacedReconnect() {
     if(pending!=null) pending.cancel(false);
 }
 private synchronized long pacedReconnectDelay() {
-    final long wait=MeterSyncPacing.reconnectDelayMillis(linkSynced,linkBroughtNew,MeterSyncPacing.minutes());
-    linkSynced=linkBroughtNew=false;
-    return wait;
+    final MeterLinkOutcome outcome=linkBroughtNew?MeterLinkOutcome.NEW_READINGS
+        :linkFailed?MeterLinkOutcome.FAILED
+        :linkAnswered?MeterLinkOutcome.NOTHING_NEW
+        :MeterLinkOutcome.UNANSWERED;
+    resetLink();
+    return pacer.linkEnded(outcome,linkConnectedMs,linkConnectedQuickly,SystemClock.elapsedRealtime(),MeterSyncPacing.minutes());
 }
 private synchronized void schedulePacedReconnect(long wait) {
     cancelPacedReconnect();
@@ -278,8 +297,10 @@ private void processVerioResponse(BluetoothGatt gatt, byte[] value) {
     final var readings=verioSession.takeReadings();
     if(!readings.isEmpty())
         persistVerioReadings(readings);
-    if(verioSession.isDone())
-        markLinkSynced();
+    if(verioSession.isDone()) {
+        if(verioSession.isFailed()) markLinkFailed();
+        else markLinkAnswered();
+        }
     // the answer queues the ack and the next request, and no write is in
     // flight any more, so drain it here
     writeNextVerioCommand(gatt);
@@ -309,8 +330,8 @@ private void beginSatelliteSession(BluetoothGatt gatt) {
     if(pin==null) {
         Log.e(LOG_ID,"Satellite meter code is missing or invalid");
         Applic.argToaster(app, R.string.satellite_meter_code_missing, android.widget.Toast.LENGTH_LONG);
-        // Paced like an empty sync, not toasted every 30 s; saving a code retries at once.
-        markLinkSynced();
+        // A failed link: never redialled and toasted twice a minute; saving a code retries at once.
+        markLinkFailed();
         return;
     }
     satelliteSession=new SatelliteMeterSession(pin,System.currentTimeMillis());
@@ -348,8 +369,9 @@ boolean newvalues=false;
                     }
                 break;
             case RecordsCharUUID:
-                // The RACP response closes the transfer, with or without records.
-                markLinkSynced();
+                // The RACP response closes the transfer: records sent, none stored, or an error.
+                if(MeterSyncPacing.racpReportSucceeded(value)) markLinkAnswered();
+                else markLinkFailed();
                 if(Natives.recordCharacteristicChanged(value)) {
                     newvalues=true;
                     Applic.app.redraw();
@@ -376,7 +398,8 @@ private synchronized void processSatelliteResponse(BluetoothGatt gatt, byte[] va
     if(update.getComplete()) {
         persistSatelliteReadings(update.getReadings());
         satelliteSession=null;
-        markLinkSynced();
+        if(update.getError()!=null) markLinkFailed();
+        else markLinkAnswered();
         return;
     }
     final byte[] command=update.getCommand();
@@ -532,9 +555,7 @@ boolean connected=false;
          // its job; go back to the battery-friendly whitelist reconnect for whenever
          // this link drops later.
          autoConnect=true;
-         synchronized(this) {
-             linkSynced=linkBroughtNew=false;
-             }
+         noteConnected();
          // Connected some other way while a paced reconnect waited.
          cancelPacedReconnect();
         if(stop) {
@@ -579,12 +600,14 @@ boolean connected=false;
                      if(autoConnect)  {
                         final long wait=pacedReconnectDelay();
                         if(wait>0L) {
-                            if(doLog) Log.i(LOG_ID,meterIndex+" nothing new, reconnect in "+wait/1000+"s");
+                            if(doLog) Log.i(LOG_ID,meterIndex+" awake with nothing new, reconnect in "+wait/1000+"s");
                             close();
                             schedulePacedReconnect(wait);
                             }
-                        else if(useConnect)
+                        else if(useConnect) {
+                            noteDialling();
                             bluetoothGatt.connect();
+                            }
                         }
                     else {
                         // The one direct attempt a fresh sighting earns did not land.
@@ -832,6 +855,7 @@ private void setCareSenseTime(BluetoothGatt bluetoothGatt) {
                     }
             }
         try {
+            noteDialling();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 mBluetoothGatt = device.connectGatt(app, autoConnect, this, BluetoothDevice.TRANSPORT_LE);
             } else {
@@ -890,9 +914,7 @@ public void disconnect() {
 void retrySatelliteSession() {
     if(satelliteMode) {
         satelliteSession=null;
-        synchronized(this) {
-            linkSynced=linkBroughtNew=false;
-            }
+        resetLink();
         cancelPacedReconnect();
         if(mBluetoothGatt!=null) disconnect();
         else connectActiveDevice(0L);

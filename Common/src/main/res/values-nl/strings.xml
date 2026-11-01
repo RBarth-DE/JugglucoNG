@@ -408,7 +408,7 @@ Als je op OK drukt, wordt er een verbinding gemaakt op deze telefoon en wordt er
 <string name="glucose_meters_nearby">Meters in de buurt</string>
 <string name="glucose_meter_recheck">Meter opnieuw controleren na</string>
 <string name="glucose_meter_recheck_now">Direct</string>
-<string name="glucose_meter_recheck_hint">Als de laatste synchronisatie niets nieuws opleverde. Een nieuwe meting kan zoveel later binnenkomen</string>
+<string name="glucose_meter_recheck_hint">Alleen voor een meter die aan blijft zonder iets nieuws. Een nieuwe meting kan zoveel later binnenkomen</string>
 <string name="glucose_meter_last_reading">Laatste meting: %1$s</string>
 <string name="glucose_meter_no_readings">Nog geen metingen geïmporteerd</string>
 <string name="satellite_meter_code_missing">Satellite-meter: stel eerst de metercode in bij de instellingen voor glucosemeters</string>

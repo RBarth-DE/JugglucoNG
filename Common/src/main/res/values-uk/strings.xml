@@ -882,7 +882,7 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_nearby">Глюкометри поблизу</string>
     <string name="glucose_meter_recheck">Повторна перевірка глюкометра через</string>
     <string name="glucose_meter_recheck_now">Одразу</string>
-    <string name="glucose_meter_recheck_hint">Якщо під час останньої синхронізації не було нових даних. Нове вимірювання може надійти з такою затримкою</string>
+    <string name="glucose_meter_recheck_hint">Лише для глюкометра, який залишається увімкненим без нових даних. Нове вимірювання може надійти з такою затримкою</string>
     <string name="glucose_meter_last_reading">Останнє вимірювання: %1$s</string>
     <string name="glucose_meter_no_readings">Вимірювання ще не імпортовано</string>
     <string name="satellite_meter_code_missing">Глюкометр Satellite: спочатку вкажіть код глюкометра в налаштуваннях глюкометрів</string>
