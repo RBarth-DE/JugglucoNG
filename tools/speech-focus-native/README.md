@@ -33,3 +33,5 @@ files/audio-focus-result.txt`.
 This does not establish behavior of every third-party media app, earbud routing,
 or Android 15+ background focus restrictions when run on an older phone. It does
 not replace the full JVM suite or the phone/Wear compilation checks.
+
+Recorded device result: [Mi 9T, Android 10, 2026-11-01](results/mi9t-2026-11-01.txt). Both real-engine scenarios passed; the trace includes the tested production-source hashes.
