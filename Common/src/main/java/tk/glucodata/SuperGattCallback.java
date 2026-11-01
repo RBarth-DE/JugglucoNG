@@ -140,7 +140,7 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
 
     private void connectionAttemptExpired(BluetoothGatt attempt) {
         // The deadline holds this callback's monitor, also used for GATT replacement.
-        if (mBluetoothGatt != attempt || stop || dataptr == 0L
+        if (mBluetoothGatt != attempt || stop || (dataptr == 0L && !allowConnectWithoutDataptr())
                 || CloneSensorRegistry.isCloneSensor(SerialNumber)
                 || SensorOwnershipRuntime.blocksLocalConnection(SerialNumber)) return;
         Log.i(LOG_ID, SerialNumber + " no connection result before deadline; retrying");
@@ -822,6 +822,13 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             UiRefreshBus.requestDataRefresh();
             return;
         }
+        // A managed main sensor's native mirror may only now exist (first reading after
+        // selection). Native current must follow it for the web server and watch value.
+        try {
+            CurrentSensorSelection.syncNativeToManaged(SerialNumber);
+        } catch (Throwable t) {
+            Log.stack(LOG_ID, "syncNativeToManaged", t);
+        }
 
         // History/replay rows are already persisted before this method. They must not
         // move notifications, glucose alerts, or the signal-loss deadline backwards.
@@ -884,6 +891,8 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             Log.stack(LOG_ID, SerialNumber, e);
         }
         CustomAlertAccess.checkAndTrigger(Applic.app, reading, rate, timmsec, SerialNumber, sensorgen);
+        // Opt-in forecast recording; returns at once and records off this thread.
+        PredictionAnalysisAccess.onRealtimeReading(SerialNumber, timmsec);
         {
             if (doLog) {
                 Log.v(LOG_ID, SerialNumber + " " + tim + " glucose=" + gl + " " + rate);
@@ -922,7 +931,9 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
                     // notifications, and alarm speech) rather than the raw native value.
                     final CurrentDisplaySource.Snapshot speakcurrent =
                             CurrentDisplaySource.resolveCurrent(Notify.glucosetimeout);
-                    currentTalker.selspeak(speakcurrent != null ? speakcurrent.getSpeechPrimaryStr() : sglucose.value);
+                    currentTalker.selspeak(speakcurrent != null
+                            ? GlucoseSpeech.format(Applic.app,speakcurrent)
+                            : GlucoseSpeech.format(Applic.app,sglucose.value,sglucose.rate));
                 }
             }
         }
@@ -1044,10 +1055,9 @@ public abstract class SuperGattCallback extends BluetoothGattCallback {
             }
             if (Natives.getxbroadcast() && loopFeedPayload != null) {
                 if (doLog)
-                    Log.i(LOG_ID, "xdrip send collapse=" + DataSmoothing.collapseChunks(app)
+                    Log.i(LOG_ID, "xdrip send intervalMin=" + DataSmoothing.exchangeThrottleIntervalMinutes(app)
                             + " smoothMin=" + DataSmoothing.getMinutes(app)
-                            + " graphOnly=" + DataSmoothing.isGraphOnly(app)
-                            + " exchangeOnly=" + DataSmoothing.smoothOnlyExchangeOutputs(app)
+                            + " targets=" + DataSmoothing.targets(app)
                             + " payloadAgeMs=" + (System.currentTimeMillis() - loopFeedPayload.getTimeMillis()));
                 SendLikexDrip.broadcastglucose(loopFeedPayload, sensorstartmsec);
                 XdripBackfill.recordLiveSent(loopFeedPayload.getSensorId(), loopFeedPayload.getTimeMillis(),

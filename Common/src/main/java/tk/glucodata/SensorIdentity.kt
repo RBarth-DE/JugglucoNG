@@ -232,6 +232,24 @@ object SensorIdentity {
             ?: true
     }
 
+    /**
+     * The native sensor a managed driver mirrors its readings into (Ottai, Sibionics), or null
+     * for a source with no native sensor at all (Nightscout follower, cloud APIs). Those drivers
+     * report no [hasNativeSensorBacking] because the app reads them from Room, but everything
+     * native that follows the main sensor — the web server's sgv.json, the watch value — only
+     * sees them when native `current` points at this mirror.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun nativeMirrorSensorName(
+        sensorId: String?,
+        nativeLookup: (String) -> String? = { Natives.resolveFullSensorName(it) },
+    ): String? {
+        val raw = normalized(sensorId) ?: return null
+        return linkedSetOf(raw, canonicalOrRaw(raw) ?: raw, resolveNativeSensorName(raw) ?: raw)
+            .firstOrNull { name -> runCatching { nativeLookup(name) }.getOrNull() != null }
+    }
+
     @JvmStatic
     fun usesNativeDirectStreamShell(sensorId: String?): Boolean {
         val raw = normalized(sensorId) ?: return false

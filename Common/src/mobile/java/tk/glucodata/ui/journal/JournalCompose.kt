@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Add
@@ -117,6 +118,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -124,6 +126,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.DateFormat
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
@@ -624,11 +627,18 @@ fun JournalEntrySheet(
                             }
                         )
                     }
-                    draft.insulinPresetId?.let { presetId ->
-                        presetsById[presetId]?.let { preset ->
-                            journalSheetItem(key = "insulin_window") {
-                                JournalInsulinWindowCard(preset = preset)
-                            }
+                    val windowPresets = when {
+                        // Two pills: both windows stay visible, each under its own pill.
+                        activeInsulinPresets.size == 2 && (
+                            selectedInsulinPreset == null ||
+                                activeInsulinPresets.any { it.id == selectedInsulinPreset.id }
+                            ) -> activeInsulinPresets
+                        selectedInsulinPreset != null -> listOf(selectedInsulinPreset)
+                        else -> emptyList()
+                    }
+                    if (windowPresets.isNotEmpty()) {
+                        journalSheetItem(key = "insulin_window") {
+                            JournalInsulinWindowCard(presets = windowPresets)
                         }
                     }
                     journalSheetItem(key = "insulin_amount") {
@@ -3120,23 +3130,29 @@ private fun JournalDateTimeSegment(
     }
 }
 
+/**
+ * One preset: the selected insulin's window. Two: each window sits under its own pill (same
+ * 8dp split as the pill row) and the card shows one curve at a time, switching between them.
+ */
 @Composable
 private fun JournalInsulinWindowCard(
-    preset: JournalInsulinPreset
+    presets: List<JournalInsulinPreset>
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val accent by animateColorAsState(
-        targetValue = Color(preset.accentColor),
-        animationSpec = tween(durationMillis = 220),
-        label = "journalInsulinWindowAccent"
-    )
-    val onset = formatJournalWindowEndpoint(preset.onsetMinutes)
-    val duration = formatJournalWindowEndpoint(preset.durationMinutes)
-    val summary = "$onset – $duration"
-    val windowDescription = stringResource(
-        R.string.journal_active_window,
-        stringResource(R.string.minutes_short_format, preset.onsetMinutes),
-        stringResource(R.string.minutes_short_format, preset.durationMinutes)
+    var openPresetId by remember { mutableStateOf<Long?>(null) }
+    val paired = presets.size > 1
+    val openPreset = when {
+        openPresetId == null -> null
+        // A lone window follows the selected preset; the open state carries over.
+        !paired -> presets.first()
+        else -> presets.firstOrNull { it.id == openPresetId }
+    }
+    val expanded = openPreset != null
+    val cardColor by animateColorAsState(
+        targetValue = MaterialTheme.colorScheme.surfaceContainerHigh.copy(
+            alpha = if (expanded) 1f else 0f
+        ),
+        animationSpec = tween(durationMillis = 180),
+        label = "journalInsulinWindowCard"
     )
 
     Surface(
@@ -3144,74 +3160,38 @@ private fun JournalInsulinWindowCard(
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
+                    // Collapsing is a dismissal; it settles a touch quicker than opening.
+                    stiffness = if (expanded) Spring.StiffnessMediumLow else Spring.StiffnessMedium
                 )
             )
             .then(
-                if (expanded) Modifier.fillMaxWidth() else Modifier.wrapContentWidth()
+                if (expanded || paired) Modifier.fillMaxWidth() else Modifier.wrapContentWidth()
             ),
-        color = if (expanded) {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        } else {
-            Color.Transparent
-        },
+        color = cardColor,
         shape = RoundedCornerShape(16.dp)
     ) {
         Column {
+            // The headers' 12dp padding puts each range where its pill's name starts
+            // (12 + 20 + 8 = 40), for both halves of the 8dp-split pill row.
             Row(
-                modifier = Modifier
-                    .then(
-                        if (expanded) {
-                            Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                        } else {
-                            // The compact visual row keeps the sheet dense; Compose expands its
-                            // pointer hit area to the platform minimum within the surrounding gap.
-                            Modifier.height(32.dp)
+                modifier = if (expanded || paired) Modifier.fillMaxWidth() else Modifier,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                presets.forEach { preset ->
+                    JournalInsulinWindowHeader(
+                        preset = preset,
+                        showing = openPreset?.id == preset.id,
+                        expanded = expanded,
+                        modifier = if (paired) Modifier.weight(1f) else Modifier,
+                        onClick = {
+                            openPresetId = if (openPreset?.id == preset.id) null else preset.id
                         }
                     )
-                    .semantics(mergeDescendants = true) {
-                        this.contentDescription = windowDescription
-                        role = Role.Button
-                    }
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                AnimatedContent(
-                    targetState = summary,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(durationMillis = 220))
-                            .togetherWith(fadeOut(animationSpec = tween(durationMillis = 120)))
-                    },
-                    label = "journalInsulinWindowSummary"
-                ) { value ->
-                    Text(
-                        text = value,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
             }
-            if (expanded) {
+            if (openPreset != null) {
                 AnimatedContent(
-                    targetState = preset,
+                    targetState = openPreset,
                     transitionSpec = {
                         fadeIn(animationSpec = tween(durationMillis = 220))
                             .togetherWith(fadeOut(animationSpec = tween(durationMillis = 140)))
@@ -3223,13 +3203,121 @@ private fun JournalInsulinWindowCard(
                         points = visiblePreset.curvePoints,
                         durationMinutes = visiblePreset.durationMinutes,
                         color = Color(visiblePreset.accentColor),
-                        contentDescription = windowDescription,
-                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                        contentDescription = journalInsulinWindowDescription(visiblePreset),
+                        // Keeps the chart off the header tabs.
+                        modifier = Modifier.padding(12.dp)
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun JournalInsulinWindowHeader(
+    preset: JournalInsulinPreset,
+    showing: Boolean,
+    expanded: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    val accent by animateColorAsState(
+        targetValue = Color(preset.accentColor),
+        animationSpec = tween(durationMillis = 220),
+        label = "journalInsulinWindowAccent"
+    )
+    // Compact under the pills, full 48dp header once the card is open; the spring grows it
+    // with the card instead of snapping.
+    val height by animateDpAsState(
+        targetValue = if (expanded) 48.dp else 32.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = if (expanded) Spring.StiffnessMediumLow else Spring.StiffnessMedium
+        ),
+        label = "journalInsulinWindowHeaderHeight"
+    )
+    val containerColor by animateColorAsState(
+        targetValue = Color(preset.accentColor).copy(alpha = if (showing) 0.16f else 0f),
+        animationSpec = tween(durationMillis = 180),
+        label = "journalInsulinWindowHeader"
+    )
+    val infoTint by animateColorAsState(
+        targetValue = if (showing) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 180),
+        label = "journalInsulinWindowInfo"
+    )
+    val onset = formatJournalWindowEndpoint(preset.onsetMinutes)
+    val duration = formatJournalWindowEndpoint(preset.durationMinutes)
+    val summary = "$onset – $duration"
+    val windowDescription = journalInsulinWindowDescription(preset)
+    val summaryStyle = MaterialTheme.typography.labelLarge
+
+    Row(
+        // Compose expands the compact row's pointer hit area to the platform minimum. The
+        // 16dp corners match the card's, so the open header reads as its tab.
+        modifier = modifier
+            .height(height)
+            .clip(RoundedCornerShape(16.dp))
+            .background(containerColor)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = windowDescription
+                role = Role.Button
+                selected = showing
+            }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Schedule,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        AnimatedContent(
+            targetState = summary,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(durationMillis = 220))
+                    .togetherWith(fadeOut(animationSpec = tween(durationMillis = 120)))
+            },
+            label = "journalInsulinWindowSummary",
+            modifier = Modifier.weight(1f, fill = false)
+        ) { value ->
+            // Half a narrow phone can be a few dp short of "21 min – 330 min"; the label
+            // gives up a little size rather than its tail.
+            Text(
+                text = value,
+                style = summaryStyle,
+                autoSize = TextAutoSize.StepBased(
+                    minFontSize = 11.sp,
+                    maxFontSize = summaryStyle.fontSize,
+                    stepSize = 0.25.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = infoTint,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
+
+/** Spoken label for one insulin's window; with two side by side, the range alone is ambiguous. */
+@Composable
+private fun journalInsulinWindowDescription(preset: JournalInsulinPreset): String {
+    val window = stringResource(
+        R.string.journal_active_window,
+        stringResource(R.string.minutes_short_format, preset.onsetMinutes),
+        stringResource(R.string.minutes_short_format, preset.durationMinutes)
+    )
+    return "${preset.displayName}, $window"
 }
 
 @Composable

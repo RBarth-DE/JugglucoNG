@@ -97,12 +97,22 @@ fun PhoneAppsSettingsScreen(
             item(key = "apps") {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SettingsSwitchItem(
+                        title = stringResource(R.string.settings_patched_libre_title),
+                        subtitle = stringResource(R.string.settings_patched_libre_desc),
+                        checked = patchedLibreEnabled,
+                        icon = Icons.Default.Share,
+                        iconTint = appColor,
+                        position = CardPosition.TOP,
+                        searchAnchor = SettingsSearchAnchors.PATCHED_LIBRE,
+                        onCheckedChange = { viewModel.togglePatchedLibreBroadcast(it) }
+                    )
+                    SettingsSwitchItem(
                         title = stringResource(R.string.settings_xdrip_broadcast_title),
                         subtitle = stringResource(R.string.settings_xdrip_broadcast_desc),
                         checked = xdripEnabled,
                         icon = Icons.Default.Radio,
                         iconTint = appColor,
-                        position = CardPosition.TOP,
+                        position = CardPosition.MIDDLE,
                         searchAnchor = SettingsSearchAnchors.XDRIP,
                         onCheckedChange = { viewModel.toggleXDripBroadcast(it) }
                     )
@@ -115,16 +125,6 @@ fun PhoneAppsSettingsScreen(
                         position = CardPosition.MIDDLE,
                         searchAnchor = SettingsSearchAnchors.XDRIP_FOLLOWER,
                         onCheckedChange = { viewModel.setXdripFollowerEnabled(it) }
-                    )
-                    SettingsSwitchItem(
-                        title = stringResource(R.string.settings_patched_libre_title),
-                        subtitle = stringResource(R.string.settings_patched_libre_desc),
-                        checked = patchedLibreEnabled,
-                        icon = Icons.Default.Share,
-                        iconTint = appColor,
-                        position = CardPosition.MIDDLE,
-                        searchAnchor = SettingsSearchAnchors.PATCHED_LIBRE,
-                        onCheckedChange = { viewModel.togglePatchedLibreBroadcast(it) }
                     )
                     SettingsSwitchItem(
                         title = stringResource(R.string.settings_glucodata_title),
