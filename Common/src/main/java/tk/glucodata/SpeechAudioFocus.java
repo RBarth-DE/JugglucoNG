@@ -5,7 +5,12 @@ import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 
-/** Android focus for short announcements. Never changes the user's stream volume. */
+/**
+ * Best-effort ducking for glucose announcements. A refused focus request does not suppress
+ * speech: the spoken value is still attempted at the selected, unchanged stream volume,
+ * without any guarantee that other media will duck (including background restrictions on
+ * Android 15+). Only a granted request is later abandoned.
+ */
 final class SpeechAudioFocus implements SpeechFocus.Audio {
     // A distinct listener also gives speech a distinct Android focus client from Notify's
     // alarm request. Abandoning speech must not abandon an alarm that started during it.
@@ -25,7 +30,14 @@ final class SpeechAudioFocus implements SpeechFocus.Audio {
         if (held) return;
         manager = (AudioManager) Applic.app.getSystemService(Context.AUDIO_SERVICE);
         if (manager != null) {
-            held = manager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            try {
+                int result = manager.requestAudioFocus(request);
+                held = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+                if (!held) android.util.Log.w("SpeechAudioFocus",
+                        "Focus denied (" + result + "); speech continues without guaranteed ducking");
+            } catch (RuntimeException e) {
+                android.util.Log.w("SpeechAudioFocus", "Focus unavailable; speech continues without guaranteed ducking", e);
+            }
         }
     }
 

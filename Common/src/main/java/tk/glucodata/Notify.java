@@ -2642,7 +2642,6 @@ public class Notify {
         runstopalarm = () -> {
             boolean wasAlarm = getisalarm(); // Check state BEFORE resetting it
             if (wasAlarm) {
-                notifyfocus = false;
                 lastalarm = -1; // Now safe to reset
 
                 {
@@ -2678,35 +2677,34 @@ public class Notify {
                 if (vibrate) {
                     stopvibratealarm();
                 }
-                // The alarm has stopped. Any closing announcement owns separate ducking
-                // focus; its delayed callback must not release a newer alarm's focus.
-                doTurnFocusoff();
-                if (!DontTalk) {
-                    if (glucosealarm && Natives.speakalarms() && !quietSilencesSound) {
-                        final CurrentDisplaySource.Snapshot current = resolveNotificationCurrentSnapshot();
-                        if (current != null) {
-                            Applic.scheduler.schedule(
-                                    () -> {
-                                        // Resolve the talker inside the lambda, not at schedule
-                                        // time: endtalk() has this whole 300ms delay in which to
-                                        // null the field, which would throw on the scheduler
-                                        // thread mid-alarm.
-                                        final Talker delayedTalker = SuperGattCallback.talker;
-                                        if (delayedTalker == null) {
-                                            Log.e(LOG_ID, "alarm speech: no talker, dropping utterance");
-                                            return;
-                                        }
-                                        // Talker owns and releases speech focus unless a newer
-                                        // alarm has taken ownership during the delay.
-                                        if (!delayedTalker.speak(current.getSpeechPrimaryStr(),
-                                                disturb ? ScanNfcV.audioattributes : notification_audio)) {
-                                            Log.e(LOG_ID, "alarm speech: engine refused utterance");
-                                        }
-                                    },
-                                    300, TimeUnit.MILLISECONDS);
-                        }
+                final CurrentDisplaySource.Snapshot closingSpeech = !DontTalk && glucosealarm
+                        && Natives.speakalarms() && !quietSilencesSound
+                        ? resolveNotificationCurrentSnapshot() : null;
+                // Own continuing speech and the closing delay before releasing alarm focus.
+                // The reservation is distinct from utterance ownership, so late completion of
+                // the opening words cannot release the closing announcement's focus.
+                final SpeechFocus.Hold closingFocus = Talker.finishAlarmFocus(closingSpeech != null);
+                if (closingSpeech != null) {
+                    try {
+                        Applic.scheduler.schedule(() -> {
+                            try {
+                                final Talker delayedTalker = SuperGattCallback.talker;
+                                if (delayedTalker == null) {
+                                    Log.e(LOG_ID, "alarm speech: no talker, dropping utterance");
+                                    return;
+                                }
+                                if (!delayedTalker.speak(closingSpeech.getSpeechPrimaryStr(),
+                                        disturb ? ScanNfcV.audioattributes : notification_audio)) {
+                                    Log.e(LOG_ID, "alarm speech: engine refused utterance");
+                                }
+                            } finally {
+                                closingFocus.close();
+                            }
+                        }, 300, TimeUnit.MILLISECONDS);
+                    } catch (RuntimeException e) {
+                        closingFocus.close();
+                        Log.stack(LOG_ID, "alarm speech: scheduling failed", e);
                     }
-                    // overwriteglucose();
                 }
 
                 if (glucosealarm)

@@ -28,7 +28,11 @@ class TalkerPlaybackTests {
     @Before fun setUp() {
         Applic.app = RuntimeEnvironment.getApplication() as SpeechTestApplication
         audio = Applic.app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        shadowOf(audio).setNextFocusRequestResponse(AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
         SpeechTestNatives.usage = AudioAttributes.USAGE_MEDIA
+        // Notify caches the process service; Robolectric creates new application services.
+        Notify.doTurnFocusoff()
+        Notify::class.java.getDeclaredField("audioManager").apply { isAccessible = true }.set(null, audio)
         Notify.makenotification_audio()
         Talker.notifyfocus = false
         talker = Talker(Applic.app)
@@ -85,19 +89,25 @@ class TalkerPlaybackTests {
         assertSame(alarmRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
     }
 
-    @Test fun speechDuringAnAlarmLeavesFocusWithTheAlarm() {
+    @Test fun speechDuringAnAlarmDefersItsRequestUntilAlarmShutdown() {
         Notify.doTurnFocuson()
         val alarmRequest = shadowOf(audio).lastAudioFocusRequest
         Talker.notifyfocus = true
         assertTrue(talker.speak("5.8"))
         assertSame(alarmRequest, shadowOf(audio).lastAudioFocusRequest)
-        talker.destruct()
-        assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
+        val id = wordsId()
+        assertNull(Talker.finishAlarmFocus(false))
+        val speechRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        assertEquals(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK, speechRequest.focusGain)
+        assertSame(alarmRequest.audioFocusRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+        listener().onDone(id)
+        assertSame(speechRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
     }
 
-    @Test fun refusedFocusIsNotAbandonedAsIfGranted() {
+    @Test fun refusedFocusIntentionallyStillQueuesSpeechWithoutClaimingDuckingSucceeded() {
         shadowOf(audio).setNextFocusRequestResponse(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
         assertTrue(talker.speak("5.8"))
+        assertEquals("5.8", shadowOf(ShadowTextToSpeech.getLastTextToSpeechInstance()).lastSpokenText)
         talker.destruct()
         assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
     }
@@ -138,6 +148,73 @@ class TalkerPlaybackTests {
     @Test fun errorDuringAlarmReleasesSpeech() = speechEndingDuringAlarm("error")
 
     @Test fun stopDuringAlarmReleasesSpeech() = speechEndingDuringAlarm("stop")
+
+    @Test fun lateStartAndStopCannotReplaceTheNewerQueuedSpeechOwner() {
+        assertTrue(talker.speak("5.7"))
+        val stale = wordsId()
+        assertTrue(talker.speak("5.8"))
+        val current = wordsId()
+        val request = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        listener().onStart(stale)
+        listener().onStop(stale, true)
+        assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
+        listener().onDone(current)
+        assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
+    }
+
+    @Test fun previewIsClaimedBeforeQueuingAndLatePreviewStartCannotReplaceSpeech() {
+        Talker::class.java.getDeclaredMethod("speakPreview").apply { isAccessible = true }.invoke(talker)
+        val stale = wordsId()
+        assertTrue(stale.startsWith("voice_preview#"))
+        assertTrue(talker.speak("5.8"))
+        val current = wordsId()
+        val request = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        listener().onStart(stale)
+        listener().onStop(stale, true)
+        assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
+        listener().onDone(current)
+        assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
+    }
+
+    @Test fun closingDelayRemainsFocusedWhenTheOpeningSpeechEnds() {
+        Notify.doTurnFocuson()
+        Talker.notifyfocus = true
+        assertTrue(talker.speak("5.7"))
+        val opening = wordsId()
+        val pending = Talker.finishAlarmFocus(true)!!
+        val speechRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        val previouslyAbandoned = shadowOf(audio).lastAbandonedAudioFocusRequest
+        try {
+            listener().onDone(opening)
+            assertSame(previouslyAbandoned, shadowOf(audio).lastAbandonedAudioFocusRequest)
+            assertTrue(talker.speak("5.8"))
+            val closing = wordsId()
+            pending.close()
+            assertSame(previouslyAbandoned, shadowOf(audio).lastAbandonedAudioFocusRequest)
+            listener().onDone(closing)
+            assertSame(speechRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+        } finally { pending.close() }
+    }
+
+    @Test fun missingClosingTalkerReleasesReservationWithoutAbandoningANewerAlarm() {
+        Notify.doTurnFocuson()
+        Talker.notifyfocus = true
+        val pending = Talker.finishAlarmFocus(true)!!
+        val speechRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        Notify.doTurnFocuson()
+        Talker.notifyfocus = true
+        val alarmRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        pending.close()
+        assertSame(speechRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+        Notify.doTurnFocusoff()
+        assertSame(alarmRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+    }
+
+    private fun wordsId() = Talker::class.java.getDeclaredField("lastWordsId").apply {
+        isAccessible = true
+    }.get(talker) as String
+
+    private fun listener() = shadowOf(ShadowTextToSpeech.getLastTextToSpeechInstance()).utteranceProgressListener
 
     private fun speechEndingDuringAlarm(ending: String) {
         val owner = Talker::class.java.getDeclaredField("lastWordsId").apply { isAccessible = true }

@@ -189,18 +189,29 @@ public static void previewVoice(int index) {
 
 private void speakPreview() {
     if (DontTalk) return;
+    final String wordsId="voice_preview#"+utteranceSeq.incrementAndGet();
+    boolean queued=false;
     try {
       synchronized (queueLock) {
+        synchronized (focus) {
+            lastWordsId=wordsId;
+            focus.claim(wordsId,!notifyfocus);
+        }
         if (android.os.Build.VERSION.SDK_INT >= minandroid) {
             engine.setAudioAttributes(mediaAudio);
-            engine.speak("This is a voice preview.", TextToSpeech.QUEUE_FLUSH, null, "voice_preview");
-            engine.setAudioAttributes(notification_audio);
+            try {
+                queued=engine.speak("This is a voice preview.", TextToSpeech.QUEUE_FLUSH, null, wordsId)==TextToSpeech.SUCCESS;
+            } finally {
+                engine.setAudioAttributes(notification_audio);
+            }
         } else {
-            engine.speak("This is a voice preview.", TextToSpeech.QUEUE_FLUSH, null);
+            queued=engine.speak("This is a voice preview.", TextToSpeech.QUEUE_FLUSH, null, wordsId)==TextToSpeech.SUCCESS;
         }
       }
     } catch (Throwable th) {
         Log.stack(LOG_ID, "speakPreview failed", th);
+    } finally {
+        if (!queued) focus.release(wordsId);
     }
 }
 
@@ -460,7 +471,7 @@ if(!DontTalk) {
                 return;
             // Speech owns a separate request, so ending it cannot release an active alarm.
             focus.release(utteranceId);
-            if ("voice_preview".equals(utteranceId)) {
+            if (utteranceId != null && utteranceId.startsWith("voice_preview#")) {
                 var cb = previewDoneCallback;
                 if (cb != null) Applic.RunOnUiThread(cb);
             }
@@ -483,7 +494,7 @@ if(!DontTalk) {
             if(LeadIn.isLeadIn(utteranceId))
                 return;
             focus.release(utteranceId);
-            if ("voice_preview".equals(utteranceId)) {
+            if (utteranceId != null && utteranceId.startsWith("voice_preview#")) {
                 var cb = previewDoneCallback;
                 if (cb != null) Applic.RunOnUiThread(cb);
             }
@@ -491,13 +502,8 @@ if(!DontTalk) {
         @Override
         public void onStart(String utteranceId) {
             if(doLog) {Log.i(LOG_ID,"onStart "+utteranceId);};
-            // Words from speak() already hold focus from before their lead-in, so this only
-            // re-confirms them; it is what takes focus for utterances that bypass speak(), such
-            // as the voice preview.
-            if(LeadIn.isLeadIn(utteranceId))
-                return;
-            if(!notifyfocus)
-                focus.claim(utteranceId);
+            // Every queue path, including preview, claims its unique owner before playback.
+            // A delayed start must never move ownership back to a flushed utterance.
             }
 
     });
@@ -533,7 +539,6 @@ boolean speak(String message,boolean chime) {
 
 private boolean queueSpeech(String message,boolean chime) {
     if(!DontTalk) {
-        final boolean ownsFocus=!notifyfocus;
         // Unique, so a callback for an earlier utterance of the same value cannot release this
         // one's focus.
         final String wordsId=message+"#"+utteranceSeq.incrementAndGet();
@@ -547,9 +552,9 @@ private boolean queueSpeech(String message,boolean chime) {
             // appended after the newer ones instead of being replaced by them. Claiming inside
             // the lock keeps the focus owner the utterance that was queued last.
             synchronized(queueLock) {
-            if(ownsFocus) {
+            synchronized(focus) {
                 lastWordsId=wordsId;
-                focus.claim(wordsId);
+                focus.claim(wordsId,!notifyfocus);
                 }
             speakResult=LeadIn.queue(new LeadIn.Engine() {
                 @Override
@@ -583,7 +588,7 @@ private boolean queueSpeech(String message,boolean chime) {
         finally {
             // Nothing will call onDone for words that were never queued, and the listener
             // ignores the lead-in, so the focus taken above is ours to give back.
-            if(ownsFocus&&!queued)
+            if(!queued)
                 focus.release(wordsId);
             }
         }
@@ -598,6 +603,14 @@ private static final SpeechFocus focus=new SpeechFocus(new SpeechAudioFocus());
 private static final java.util.concurrent.atomic.AtomicLong utteranceSeq=new java.util.concurrent.atomic.AtomicLong();
 /** The words this Talker last claimed focus for, released by destruct(). */
 private volatile String lastWordsId;
+
+/** Transfer outstanding speech and the closing delay before dropping alarm focus. */
+static SpeechFocus.Hold finishAlarmFocus(boolean closingAnnouncement) {
+    synchronized(focus) {
+        notifyfocus=false;
+        return focus.handoff(closingAnnouncement,Notify::doTurnFocusoff);
+    }
+}
 
 private static final String PREFS="tk.glucodata_preferences";
 private static final String KEY_CHIME="voice_chime_before_glucose";
@@ -629,7 +642,7 @@ private static final long FAILED_SPEAK_RETRY_MS=30_000L;
 public boolean needsReinit() {
     return health.needsReinit();
     }
-static boolean notifyfocus=false;
+static volatile boolean notifyfocus=false;
 //private static final AudioAttributes notification_audio = (new AudioAttributes.Builder()) .setLegacyStreamType(TextToSpeech.Engine.DEFAULT_STREAM) .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH) .build(); 
 //private static final AudioAttributes notification_audio =(android.os.Build.VERSION.SDK_INT >= 21)?new AudioAttributes.Builder().setUsage(isWearable? USAGE_ASSISTANCE_SONIFICATION:USAGE_NOTIFICATION ) .build():null;
 //private static final AudioAttributes notification_audio = notification_audio;
