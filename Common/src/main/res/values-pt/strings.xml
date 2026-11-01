@@ -1785,8 +1785,6 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="journal_insulin_chart_separate">Cada dose separada</string>
     <string name="notification_settings_title">Configurações de notificação</string>
     <string name="notification_settings_subtitle">Personalize a bandeja de notificações</string>
-    <string name="lock_screen_aod">Tela de bloqueio (AOD)</string>
-    <string name="aod_settings_title">Configurações de AOD</string>
     <string name="aod_show_on_lockscreen">Mostrar no ecrã de bloqueio</string>
     <string name="aod_show_on_lockscreen_desc">Mostrar também quando o ecrã está ligado e bloqueado</string>
     <string name="customize_always_on_display">Personalize a tela sempre ativa</string>

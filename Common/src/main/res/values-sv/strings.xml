@@ -1784,8 +1784,6 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="journal_insulin_chart_separate">Varje dos för sig</string>
     <string name="notification_settings_title">Aviseringsinställningar</string>
     <string name="notification_settings_subtitle">Anpassa aviseringspanelen</string>
-    <string name="lock_screen_aod">Låsskärm (AOD)</string>
-    <string name="aod_settings_title">AOD-inställningar</string>
     <string name="aod_show_on_lockscreen">Visa på låsskärmen</string>
     <string name="aod_show_on_lockscreen_desc">Visa även när skärmen är på och låst</string>
     <string name="customize_always_on_display">Anpassa alltid-på-skärmen</string>
