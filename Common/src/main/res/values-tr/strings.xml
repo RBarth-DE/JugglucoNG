@@ -903,6 +903,9 @@ Tamam\'a basmak bağlantı için QR kod görüntüleyecektir. QR kodu diğer tel
     <string name="glucose_meters_none">Yapılandırılmış ölçer yok</string>
     <string name="glucose_meters_none_desc">Ölçümleri içe aktarmak için yakındaki bir ölçeri bulun.</string>
     <string name="glucose_meters_nearby">Yakındaki ölçerler</string>
+    <string name="glucose_meter_recheck">Cihazı tekrar kontrol etme aralığı</string>
+    <string name="glucose_meter_recheck_now">Hemen</string>
+    <string name="glucose_meter_recheck_hint">Satellite gibi açık kalan ölçüm cihazları için. Yeni bir ölçüm bu kadar geç gelebilir</string>
     <string name="glucose_meter_last_reading">Son ölçüm: %1$s</string>
     <string name="glucose_meter_no_readings">Henüz ölçüm içe aktarılmadı</string>
     <string name="satellite_meter_code_missing">Satellite ölçer: önce ölçer kodunu glikoz ölçer ayarlarında girin</string>

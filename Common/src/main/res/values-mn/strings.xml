@@ -440,6 +440,9 @@ OK дарснаар энэ утсан дээр холболт үүсч, өөр A
     <string name="glucose_meters_none">Хэмжигч тохируулаагүй</string>
     <string name="glucose_meters_none_desc">Хэмжилт импортлохын тулд ойролцоох хэмжигчийг олно уу.</string>
     <string name="glucose_meters_nearby">Ойролцоох хэмжигчүүд</string>
+    <string name="glucose_meter_recheck">Глюкометрийг дахин шалгах хугацаа</string>
+    <string name="glucose_meter_recheck_now">Шууд</string>
+    <string name="glucose_meter_recheck_hint">Satellite шиг үргэлж асаалттай байдаг глюкометрт. Шинэ хэмжилт ийм хугацаагаар хоцорч ирж болно</string>
     <string name="glucose_meter_last_reading">Сүүлийн хэмжилт: %1$s</string>
     <string name="glucose_meter_no_readings">Хэмжилт хараахан импортлоогүй</string>
     <string name="satellite_meter_code_missing">Satellite хэмжигч: эхлээд глюкометрийн тохиргоонд хэмжигчийн кодыг оруулна уу</string>

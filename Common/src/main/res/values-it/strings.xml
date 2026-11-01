@@ -788,6 +788,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_none">Nessun glucometro configurato</string>
     <string name="glucose_meters_none_desc">Trova un glucometro nelle vicinanze per iniziare a importare le misurazioni.</string>
     <string name="glucose_meters_nearby">Glucometri nelle vicinanze</string>
+    <string name="glucose_meter_recheck">Ricontrolla il glucometro dopo</string>
+    <string name="glucose_meter_recheck_now">Subito</string>
+    <string name="glucose_meter_recheck_hint">Per i glucometri che restano accesi, come Satellite. Una nuova misura può arrivare con questo ritardo</string>
     <string name="glucose_meter_last_reading">Ultima misurazione: %1$s</string>
     <string name="glucose_meter_no_readings">Nessuna misurazione ancora importata</string>
     <string name="satellite_meter_code_missing">Glucometro Satellite: imposta prima il codice del glucometro nelle impostazioni dei glucometri</string>

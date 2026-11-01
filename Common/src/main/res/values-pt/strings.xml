@@ -808,6 +808,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_none">Nenhum medidor configurado</string>
     <string name="glucose_meters_none_desc">Procure um medidor próximo para começar a importar medições.</string>
     <string name="glucose_meters_nearby">Medidores próximos</string>
+    <string name="glucose_meter_recheck">Verificar o medidor novamente após</string>
+    <string name="glucose_meter_recheck_now">Imediatamente</string>
+    <string name="glucose_meter_recheck_hint">Para medidores que ficam ligados, como o Satellite. Uma nova medição pode chegar com este atraso</string>
     <string name="glucose_meter_last_reading">Última medição: %1$s</string>
     <string name="glucose_meter_no_readings">Ainda não foram importadas medições</string>
     <string name="satellite_meter_code_missing">Medidor Satellite: defina primeiro o código do medidor nas definições de medidores de glicose</string>

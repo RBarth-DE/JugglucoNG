@@ -434,6 +434,9 @@ Az OK megnyomása létrehoz egy kapcsolatot ezen a telefonon, és megjelenít eg
     <string name="glucose_meters_none">Nincs beállított mérő</string>
     <string name="glucose_meters_none_desc">Közeli mérő keresésével indítható a mérések importálása.</string>
     <string name="glucose_meters_nearby">Közeli mérők</string>
+    <string name="glucose_meter_recheck">Mérő újbóli ellenőrzése</string>
+    <string name="glucose_meter_recheck_now">Azonnal</string>
+    <string name="glucose_meter_recheck_hint">Bekapcsolva maradó mérőkhöz, mint a Satellite. Egy új mérés ennyivel később érkezhet meg</string>
     <string name="glucose_meter_last_reading">Utolsó mérés: %1$s</string>
     <string name="glucose_meter_no_readings">Még nincs importált mérés</string>
     <string name="glucose_meter_forget">Elfelejtés</string>

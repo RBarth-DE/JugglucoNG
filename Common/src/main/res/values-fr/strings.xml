@@ -838,6 +838,9 @@ Pressing OK will generate a connection on this phone and display a QR code that 
     <string name="glucose_meters_none">Aucun lecteur configuré</string>
     <string name="glucose_meters_none_desc">Recherchez un lecteur à proximité pour importer des mesures.</string>
     <string name="glucose_meters_nearby">Lecteurs à proximité</string>
+    <string name="glucose_meter_recheck">Revérifier le lecteur après</string>
+    <string name="glucose_meter_recheck_now">Immédiatement</string>
+    <string name="glucose_meter_recheck_hint">Pour les lecteurs qui restent allumés, comme Satellite. Une nouvelle mesure peut arriver avec ce retard</string>
     <string name="glucose_meter_last_reading">Dernière mesure : %1$s</string>
     <string name="glucose_meter_no_readings">Aucune mesure importée</string>
     <string name="satellite_meter_code_missing">Lecteur Satellite : définissez d\'abord le code du lecteur dans les réglages des lecteurs de glycémie</string>

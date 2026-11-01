@@ -462,6 +462,9 @@ Marka la cadaadiyo OK waxay dhalin doontaa xidhiidh teleefankan oo waxa ay soo b
  <string name="glucose_meters_none">Mitir lama habayn</string>
  <string name="glucose_meters_none_desc">Raadi mitir kuu dhow si aad u soo dejiso cabbirrada.</string>
  <string name="glucose_meters_nearby">Mitirrada kuu dhow</string>
+ <string name="glucose_meter_recheck">Hubi mitirka mar kale kadib</string>
+ <string name="glucose_meter_recheck_now">Isla markiiba</string>
+ <string name="glucose_meter_recheck_hint">Qalabka cabbirka ee shidan ku jira, sida Satellite. Cabbir cusub ayaa intaas ka dib iman kara</string>
  <string name="glucose_meter_last_reading">Cabbirkii ugu dambeeyay: %1$s</string>
  <string name="glucose_meter_no_readings">Weli cabbir lama soo dejin</string>
  <string name="satellite_meter_code_missing">Mitirka Satellite: marka hore geli koodka mitirka ee dejinta mitirrada gulukooska</string>

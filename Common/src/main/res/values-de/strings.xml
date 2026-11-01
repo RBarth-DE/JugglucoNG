@@ -420,6 +420,9 @@ Durch Drücken von „OK“ wird eine Verbindung auf diesem Telefon hergestellt 
 <string name="glucose_meters_none">Keine Messgeräte eingerichtet</string>
 <string name="glucose_meters_none_desc">Ein Messgerät in der Nähe suchen, um Messwerte zu importieren.</string>
 <string name="glucose_meters_nearby">Messgeräte in der Nähe</string>
+<string name="glucose_meter_recheck">Messgerät erneut prüfen nach</string>
+<string name="glucose_meter_recheck_now">Sofort</string>
+<string name="glucose_meter_recheck_hint">Für Messgeräte, die eingeschaltet bleiben, wie Satellite. Ein neuer Messwert kann so viel später ankommen</string>
 <string name="glucose_meter_last_reading">Letzter Messwert: %1$s</string>
 <string name="glucose_meter_no_readings">Noch keine Messwerte importiert</string>
 <string name="satellite_meter_code_missing">Satellite-Messgerät: Legen Sie zuerst den Messgerätecode in den Einstellungen für Blutzuckermessgeräte fest</string>
