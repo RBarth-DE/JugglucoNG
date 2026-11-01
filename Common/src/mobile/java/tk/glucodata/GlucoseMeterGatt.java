@@ -53,7 +53,6 @@ import android.os.Build;
 import androidx.annotation.NonNull;
 
 import java.util.List;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import tk.glucodata.glucosemeter.MeterLinkOutcome;
@@ -146,8 +145,9 @@ private boolean linkAnswered=false;
 private boolean linkFailed=false;
 private boolean linkBroughtNew=false;
 private final MeterLinkPacer pacer=new MeterLinkPacer();
-private ScheduledFuture<?> pacedReconnect;
-// Bumped by every cancel, so a paced task the executor already started sees it is stale.
+// A MeterRecheckAlarm is set for this meter.
+private boolean pacedWaiting=false;
+// Bumped by every cancel, so an alarm already being delivered sees it is stale.
 private long pacedTicket=0L;
 private synchronized void markLinkAnswered() { linkAnswered=true; }
 private synchronized void markLinkFailed() { linkAnswered=linkFailed=true; }
@@ -155,11 +155,11 @@ private synchronized void markLinkBroughtNew() { linkBroughtNew=true; }
 private synchronized void resetLink() { linkAnswered=linkFailed=linkBroughtNew=false; }
 /** The last link found a meter that never sleeps (only the Satellite, so far). */
 boolean staysOn() { return satelliteMode; }
-private synchronized void cancelPacedReconnect() {
+synchronized void cancelPacedReconnect() {
     ++pacedTicket;
-    final var pending=pacedReconnect;
-    pacedReconnect=null;
-    if(pending!=null) pending.cancel(false);
+    if(!pacedWaiting) return;
+    pacedWaiting=false;
+    MeterRecheckAlarm.cancel(meterIndex);
 }
 private synchronized long pacedReconnectDelay() {
     final MeterLinkOutcome outcome=linkBroughtNew?MeterLinkOutcome.NEW_READINGS
@@ -171,18 +171,18 @@ private synchronized long pacedReconnectDelay() {
 }
 private synchronized void schedulePacedReconnect(long wait) {
     cancelPacedReconnect();
-    final long ticket=pacedTicket;
-    pacedReconnect=Applic.scheduler.schedule(()->runPacedReconnect(ticket),wait,TimeUnit.MILLISECONDS);
+    pacedWaiting=true;
+    MeterRecheckAlarm.set(meterIndex,pacedTicket,wait);
 }
-private synchronized void runPacedReconnect(long ticket) {
+synchronized void runPacedReconnect(long ticket) {
     // Cancelled, removed, or connected some other way since: never touch a newer link.
     if(ticket!=pacedTicket || stop || mBluetoothGatt!=null) return;
-    pacedReconnect=null;
+    pacedWaiting=false;
     openGatt();
 }
 /** The interval was changed: a meter waiting under the old one is dialled now. */
 synchronized void pacingChanged() {
-    if(pacedReconnect==null) return;
+    if(!pacedWaiting) return;
     cancelPacedReconnect();
     if(mBluetoothGatt==null && !stop) openGatt();
 }
@@ -304,10 +304,11 @@ private void persistVerioReadings(List<VerioSession.Reading> readings) {
             meterIndex,reading.getTimestampMillis(),reading.getMgdlTenths());
         if(saved==null || saved.length<2) continue;
         GlucoseMeterJournalBridge.record(meterIndex,saved[0],saved[1]);
-        if(saved.length>=3 && saved[2]!=0L) {
+        // Stored at all means newer than the meter's last reading; saved[2] only says it is
+        // recent and has a legacy label.
+        markLinkBroughtNew();
+        if(saved.length>=3 && saved[2]!=0L)
             newvalues=true;
-            markLinkBroughtNew();
-            }
         final int stored=Natives.GlucoseMeterGetLastPos(meterIndex);
         if(reading.getRecord()>stored)
             Natives.GlucoseMeterSetLastPos(meterIndex,reading.getRecord());
@@ -351,10 +352,10 @@ boolean newvalues=false;
                 final long[] saved = Natives.GlucoseMeterSaveResult(meterIndex,value);
                 if(saved != null && saved.length >= 2) {
                     GlucoseMeterJournalBridge.record(meterIndex, saved[0], saved[1]);
+                    markLinkBroughtNew();
                 }
                 if(saved != null && saved.length >= 3 && saved[2] != 0L) {
                     newvalues=true;
-                    markLinkBroughtNew();
                     receivedTime=System.currentTimeMillis();
                     updateview();
                     Applic.app.redraw();
@@ -408,10 +409,11 @@ private void persistSatelliteReadings(List<SatelliteMeterProtocol.Reading> readi
         if(saved==null || saved.length<2) continue;
         stored=true;
         GlucoseMeterJournalBridge.record(meterIndex,saved[0],saved[1]);
-        if(saved.length>=3 && saved[2]!=0L) {
+        // Stored at all means newer than the meter's last reading; saved[2] only says it is
+        // recent and has a legacy label.
+        markLinkBroughtNew();
+        if(saved.length>=3 && saved[2]!=0L)
             newvalues=true;
-            markLinkBroughtNew();
-            }
     }
     if(stored) {
         receivedTime=System.currentTimeMillis();
@@ -590,13 +592,19 @@ boolean connected=false;
                         }
                   else {
                      if(autoConnect)  {
-                        final long wait=pacedReconnectDelay();
-                        if(wait>0L) {
-                            if(doLog) Log.i(LOG_ID,meterIndex+" stays on, nothing new, reconnect in "+wait/1000+"s");
-                            close();
-                            schedulePacedReconnect(wait);
+                        final boolean paced;
+                        // One hold of the lock pacingChanged takes, so an interval change
+                        // cannot slip between reading the interval and arming the alarm.
+                        synchronized(this) {
+                            final long wait=pacedReconnectDelay();
+                            paced=wait>0L;
+                            if(paced) {
+                                if(doLog) Log.i(LOG_ID,meterIndex+" stays on, nothing new, reconnect in "+wait/1000+"s");
+                                close();
+                                schedulePacedReconnect(wait);
+                                }
                             }
-                        else if(useConnect)
+                        if(!paced && useConnect)
                             bluetoothGatt.connect();
                         }
                     else {
