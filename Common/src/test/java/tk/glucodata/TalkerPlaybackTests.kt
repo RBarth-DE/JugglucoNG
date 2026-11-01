@@ -132,6 +132,45 @@ class TalkerPlaybackTests {
         focus.release("5.9#2")
         assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
     }
+
+    @Test fun completionDuringAlarmReleasesSpeech() = speechEndingDuringAlarm("done")
+
+    @Test fun errorDuringAlarmReleasesSpeech() = speechEndingDuringAlarm("error")
+
+    @Test fun stopDuringAlarmReleasesSpeech() = speechEndingDuringAlarm("stop")
+
+    private fun speechEndingDuringAlarm(ending: String) {
+        val owner = Talker::class.java.getDeclaredField("lastWordsId").apply { isAccessible = true }
+        assertTrue(talker.speak("5.7"))
+        val earlierId = owner.get(talker) as String
+        assertTrue(talker.speak("5.8"))
+        val currentId = owner.get(talker) as String
+        val speechRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        val listener = shadowOf(ShadowTextToSpeech.getLastTextToSpeechInstance()).utteranceProgressListener
+
+        // A loss alarm (or an alarm without spoken values) starts while routine speech owns
+        // ducking focus. No closing announcement will replace that speech owner later.
+        Notify.doTurnFocuson()
+        Talker.notifyfocus = true
+        val alarmRequest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        listener.onStop(earlierId, true)
+        listener.onDone(LeadIn.ID)
+        assertNull(shadowOf(audio).lastAbandonedAudioFocusRequest)
+
+        when (ending) {
+            "done" -> listener.onDone(currentId)
+            "error" -> listener.onError(currentId)
+            "stop" -> listener.onStop(currentId, true)
+        }
+        assertSame(speechRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+
+        Talker.notifyfocus = false
+        Notify.doTurnFocusoff()
+        assertSame(alarmRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+        // Speech is already released: shutdown must not be needed to restore media.
+        talker.destruct()
+        assertSame(alarmRequest, shadowOf(audio).lastAbandonedAudioFocusRequest)
+    }
 }
 
 @Implements(TextToSpeech::class)

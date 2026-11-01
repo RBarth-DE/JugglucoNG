@@ -458,8 +458,8 @@ if(!DontTalk) {
             // The words that follow the lead-in still need the focus speak() took for them.
             if(LeadIn.isLeadIn(utteranceId))
                 return;
-            if(!notifyfocus)
-                focus.release(utteranceId);
+            // Speech owns a separate request, so ending it cannot release an active alarm.
+            focus.release(utteranceId);
             if ("voice_preview".equals(utteranceId)) {
                 var cb = previewDoneCallback;
                 if (cb != null) Applic.RunOnUiThread(cb);
@@ -473,8 +473,7 @@ if(!DontTalk) {
             if(doLog) {Log.i(LOG_ID,"onStop "+utteranceId+" interrupted="+interrupted);};
             if(LeadIn.isLeadIn(utteranceId))
                 return;
-            if(!notifyfocus)
-                focus.release(utteranceId);
+            focus.release(utteranceId);
             }
 
         @Override
@@ -483,8 +482,7 @@ if(!DontTalk) {
             // A lead-in that failed to play is skipped; the words queued after it still play.
             if(LeadIn.isLeadIn(utteranceId))
                 return;
-            if(!notifyfocus)
-                focus.release(utteranceId);
+            focus.release(utteranceId);
             if ("voice_preview".equals(utteranceId)) {
                 var cb = previewDoneCallback;
                 if (cb != null) Applic.RunOnUiThread(cb);
