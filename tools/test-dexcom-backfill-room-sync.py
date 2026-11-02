@@ -26,7 +26,8 @@ methods = [method(dex, x) for x in [
     'private synchronized void syncBackfillToRoom(', 'private    void getdata(',
     'public synchronized void close(',
 ]]
-fields = [re.search(r'private long backfillRoomSyncFromMsec=0L;', dex).group(0)]
+fields = [re.search(r'private long backfillRoomSyncFromMsec=0L;', dex).group(0),
+          re.search(r'private boolean attemptEverConnected = false;', dex).group(0)]
 
 preamble = r'''
 package tk.glucodata;

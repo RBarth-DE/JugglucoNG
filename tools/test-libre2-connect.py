@@ -91,7 +91,6 @@ class SuperGattCallback {
     static class SensorOwnershipRuntime { static boolean blocked; static boolean blocksLocalConnection(String s){return blocked;} }
     static class WearSensorClaim { static int releases; static void onLocalGattDisconnected(String s){releases++;} }
     static class Natives { static int resets; static void resetbluetooth(long ptr){resets++;} static String getDeviceAddress(long p,boolean n){return "fake";} }
-    static class SystemClock { static long elapsedRealtime(){return Applic.scheduler.now;} }
     static class Build { static class VERSION { static int SDK_INT=37; } static class VERSION_CODES { static int M=23; } }
     static class R { static class string { static int turn_on_nearby_devices_permission=0; } }
     static class Log {
