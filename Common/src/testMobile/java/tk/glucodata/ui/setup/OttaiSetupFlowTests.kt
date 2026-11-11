@@ -9,6 +9,14 @@ import tk.glucodata.drivers.ottai.OttaiConstants
 import tk.glucodata.ui.components.CardPosition
 
 class OttaiSetupFlowTests {
+    @Test fun firmwareEntryNeedsAnAccountAndAddressButNeverRequiresBindingForCredentials() {
+        assertEquals(true, ottaiFirmwareEntryAvailable(true, true, true, false))
+        assertEquals(false, ottaiFirmwareEntryAvailable(false, true, true, false))
+        assertEquals(false, ottaiFirmwareEntryAvailable(true, false, true, false))
+        assertEquals(false, ottaiFirmwareEntryAvailable(true, true, false, false))
+        assertEquals(true, ottaiFirmwareEntryAvailable(false, false, false, true))
+    }
+
     @Test
     fun `stored session region follows its backend`() {
         assertEquals(OttaiRegion.CN, ottaiRegionForApiBase(OttaiConstants.API_BASE))
@@ -51,6 +59,15 @@ class OttaiSetupFlowTests {
             false,
             ottaiSetupPublishesManagedSensor(OttaiSetupConnectRoute.V3_CREDENTIAL_BOOTSTRAP),
         )
+    }
+
+    @Test
+    fun `V3 setup can use its saved BLE address without selecting the sensor again`() {
+        assertEquals("18:DC:12:80:82:10", ottaiSetupBleAddress("", "18:dc:12:80:82:10"))
+        assertEquals("18:DC:12:80:82:10", ottaiSetupBleAddress(null, null, "18:DC:12:80:82:10"))
+        assertEquals("AA:BB:CC:DD:EE:FF", ottaiSetupBleAddress("AA:BB:CC:DD:EE:FF", "18:DC:12:80:82:10"))
+        // Cloud IDs and box serials alone do not establish a BLE address.
+        assertNull(ottaiSetupBleAddress("18DC12808210", "OTT1234567"))
     }
 
     @Test
