@@ -288,4 +288,35 @@ class SensorHandoverStateTests {
         assertEquals(0L, store.suppressUntil)
         assertFalse(state.missedReadingSuppressed(now))
     }
+
+    /** Official end passed, but the sensor still delivers (Dexcom G7 grace period). */
+    private fun gracePrimary(delivering: Boolean) =
+        HandoverSensor("OLD", startMs = oldEnd - 10L * 24 * 60 * 60 * 1000, endMs = oldEnd) { delivering }
+
+    @Test
+    fun keepsOldPrimaryWhileItStillDeliversAndSuccessorWarms() {
+        val state = SensorHandoverState(FakeStore())
+        assertEquals(
+            HandoverDecision.None,
+            state.evaluate(true, gracePrimary(true), listOf(warmingSuccessor()), now)
+        )
+    }
+
+    @Test
+    fun switchesWhenSuccessorDeliversEvenIfOldStillDelivers() {
+        val state = SensorHandoverState(FakeStore())
+        assertEquals(
+            HandoverDecision.Switch("OLD", "NEW", successorWarming = false),
+            state.evaluate(true, gracePrimary(true), listOf(successor()), now)
+        )
+    }
+
+    @Test
+    fun switchesToWarmingSuccessorOnceOldStopsDelivering() {
+        val state = SensorHandoverState(FakeStore())
+        assertEquals(
+            HandoverDecision.Switch("OLD", "NEW", successorWarming = true),
+            state.evaluate(true, gracePrimary(false), listOf(warmingSuccessor()), now)
+        )
+    }
 }

@@ -110,9 +110,16 @@ internal class SensorHandoverState(
         // "Warming" strictly means inside the warmup phase after activation. A
         // successor that is merely disconnected (old start, no readings) is NOT
         // warming - it gets no suppression window, so a real outage still alarms.
+        val successorDelivering = successor.hasRecentReading()
         val warming = successor.startMs > 0L &&
             nowMs - successor.startMs < WARMUP_DURATION_MS &&
-            !successor.hasRecentReading()
+            !successorDelivering
+        // Past the official end a sensor can still deliver (Dexcom G7 grace
+        // period). While the successor has no data yet, keep the old one as
+        // primary instead of opening a gap; switch once the successor delivers
+        // or the old one has actually stopped. Not latched, so it re-checks on
+        // every tick.
+        if (!successorDelivering && primary.hasRecentReading()) return HandoverDecision.None
         return HandoverDecision.Switch(
             oldSerial = primary.serial,
             newSerial = successor.serial,
